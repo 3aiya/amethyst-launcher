@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Amethyst Launcher
 
 A modern Minecraft launcher built with Electron, React, TypeScript, and Tailwind CSS.
@@ -439,3 +440,6 @@ amethyst-launcher/
 - Offline mode only works with game files you already legally own, exactly
   like the official launcher's LAN/offline play — this launcher provides no
   way to play without owning the game.
+=======
+# amethyst-launcher
+>>>>>>> b50ecfb9b7162aecb9e47e97ffbe52eb4447a619
