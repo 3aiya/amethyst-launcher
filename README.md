@@ -1,8 +1,58 @@
-<<<<<<< HEAD
-# Amethyst Launcher
+<div align="center">
 
-A modern Minecraft launcher built with Electron, React, TypeScript, and Tailwind CSS.
-Dark theme, `#FF00FF` accent, Modrinth-inspired sidebar layout.
+# 💎 Amethyst Launcher
+
+**A modern, all-in-one Minecraft launcher — play instantly, discover mods,
+and stay connected with the community.**
+
+*Powered by Amethyst Community · Developed by 3aiya*
+
+</div>
+
+---
+
+Amethyst Launcher is a sleek, dark-themed Minecraft launcher built for
+speed and simplicity. Play Vanilla, Fabric, Forge, or our own curated
+Amethyst modpack, browse and install content straight from Modrinth, and
+jump into the Amethyst Community server — all from one clean interface.
+
+## ✨ Highlights
+
+- 🎮 **One-click play** — Vanilla, Fabric, Forge, and the custom Amethyst
+  modpack, each in its own clean, isolated instance.
+- 🔍 **Built-in content browser** — search and install mods, modpacks,
+  resource packs, data packs, and shaders directly from Modrinth.
+- 📚 **Instance library** — every version you play is saved, renameable,
+  and ready to relaunch instantly — no reinstalling, no redownloading.
+- 🌐 **Amethyst Community server**, front and center, with live status and
+  one-click join.
+- 🔑 **Sign in with Microsoft** — no extra setup, just click and log in.
+- 🎨 **Skins, Discord Rich Presence, and auto-updates** built right in.
+
+## 📥 Download
+
+Grab the latest installer from the
+[**Releases**](../../releases/latest) page and run it — that's it. The
+launcher checks for and installs updates automatically after that, so
+you'll always be on the newest version.
+
+## 🖼️ Screenshots
+
+*(add a few screenshots here once you have some!)*
+
+## 🙌 Credits
+
+**Amethyst Launcher** is powered by the **Amethyst Community** and
+developed by **3aiya**.
+
+---
+
+<br>
+
+# Development
+
+The rest of this document covers the technical side — building from
+source, configuration, and how everything fits together.
 
 ## Stack
 
@@ -440,6 +490,3 @@ amethyst-launcher/
 - Offline mode only works with game files you already legally own, exactly
   like the official launcher's LAN/offline play — this launcher provides no
   way to play without owning the game.
-=======
-# amethyst-launcher
->>>>>>> b50ecfb9b7162aecb9e47e97ffbe52eb4447a619
