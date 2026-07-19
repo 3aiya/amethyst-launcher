@@ -38,7 +38,7 @@ you'll always be on the newest version.
 
 ## 🖼️ Screenshots
 
-*(add a few screenshots here once you have some!)*
+*(screenshots!)*
 
 ## 🙌 Credits
 
