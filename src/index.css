@@ -1,0 +1,57 @@
+@import "tailwindcss";
+@import "@fontsource/press-start-2p";
+
+@theme {
+  --color-accent: #ff00ff;
+  --color-accent-hover: #e000e0;
+  --color-accent-pressed: #c400c4;
+  --color-bg: #0d0d10;
+  --color-bg-sidebar: #09090b;
+  --color-bg-elevated: #17171b;
+  --color-bg-card: #1b1b20;
+  --color-bg-card-hover: #232329;
+  --color-border: #2a2a30;
+  --color-border-light: #34343c;
+  --font-sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-pixel: "Press Start 2P", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg-sidebar);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-light) transparent;
+}
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.pixel-button {
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+}
+
+.pixel-button:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.45);
+}
+
+.pixel-button:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+}
