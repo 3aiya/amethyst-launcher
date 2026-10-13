@@ -1,0 +1,49 @@
+[package]
+name = "amethyst-launcher"
+version = "1.0.10"
+description = "Amethyst Launcher - a modern Minecraft launcher built with Tauri, React and Rust"
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+futures-util = "0.3"
+
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+
+zip = "0.6"
+walkdir = "2"
+
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+thiserror = "1"
+anyhow = "1"
+
+discord-rich-presence = "0.2"
+
+fastnbt = "2"
+flate2 = "1"
+open = "5"
+urlencoding = "2"
+base64 = "0.22"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
