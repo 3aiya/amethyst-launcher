@@ -1,6 +1,6 @@
 {
   "name": "amethyst-launcher",
-  "version": "1.0.10",
+  "version": "1.0.9",
   "description": "Amethyst Launcher - a modern Minecraft launcher built with Tauri, React and Rust",
   "private": true,
   "author": "3aiya",
