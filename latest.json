@@ -1,11 +1,11 @@
 {
-    "version":  "1.1.0",
-    "notes":  "Amethyst Launcher 1.1.0",
-    "pub_date":  "2026-10-13T16:25:51Z",
+    "version":  "1.1.1",
+    "notes":  "Amethyst Launcher 1.1.1",
+    "pub_date":  "2026-10-17T14:51:43Z",
     "platforms":  {
                       "windows-x86_64":  {
-                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR0ZYdThzRUJWZUliaTc3T0JnVUkyZXlFMk40L05IOTR6UzNubytDV0NucGdoTS8rMUN0a3pCRVlXUHhxZFliZWxyVGx4RnhLMSsrNEhJS3ByTGpNajdxZGl0dTd2SEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA4NzUwCWZpbGU6QW1ldGh5c3QgTGF1bmNoZXJfMS4xLjBfeDY0X2VuLVVTLm1zaQpQb0tXa1lhUVV6WHFOVDVqdUdpbEN0eGtOU3pyaGVLNlN2OWN6eWk5VXlTZ1o4c1hYdjZmbWZseXdwRlJMcEtEOVE1ZFgxY1BMUHRXRTFaeFdpL2NBZz09Cg==",
-                                             "url":  "https://github.com/3aiya/amethyst-launcher/releases/download/v1.1.0/Amethyst.Launcher_1.1.0_x64_en-US.msi"
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRR0ZYdThzRUJWZUdxRmlzbGJpYWlxREZseUpPRHRMSXBONTg3TXlab21CaVFycUNMM3RVR0RTZlFiY3B0ZXBjU3hoakx1a2FaT2NrdERONWl3SGVrR1djM3RpdTVLR0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMjQ4NzAxCWZpbGU6QW1ldGh5c3QgTGF1bmNoZXJfMS4xLjFfeDY0X2VuLVVTLm1zaQpGdWt0U2wreXFXUGtZMFdHM21WRmNwZHhRUkk4alYyZlp4STdrN2JPcjhNb1pnWHdOWlFJcnRUc3pvL09SUHFjT280TXFTd2dYOWdRN3F6Zm1mU3pEdz09Cg==",
+                                             "url":  "https://github.com/3aiya/amethyst-launcher/releases/download/v1.1.1/Amethyst.Launcher_1.1.1_x64_en-US.msi"
                                          }
                   }
 }
