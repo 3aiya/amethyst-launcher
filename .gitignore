@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Local tool cache
+.tools/
+
+# Secrets - signing keys and API keys never belong in the repo
+*.key
+*.key.pub
+.env
+.env.*
+
+# Stale updater manifest (the real one lives in the repo root)
+src-tauri/latest.json
+
+# Local archives and backups
+zip/
+*.rar
+*.zip
+*.7z

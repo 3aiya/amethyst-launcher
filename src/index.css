@@ -1,0 +1,278 @@
+@import "tailwindcss";
+@import "@fontsource/press-start-2p";
+
+@theme {
+  --color-accent: #ff00ff;
+  --color-accent-hover: #e000e0;
+  --color-accent-pressed: #c400c4;
+  /* Text/icon colour that sits on top of an accent-filled button. */
+  --color-accent-fg: #000000;
+  --color-bg: #0d0d10;
+  --color-bg-sidebar: #09090b;
+  --color-bg-elevated: #17171b;
+  --color-bg-card: #1b1b20;
+  --color-bg-card-hover: #232329;
+  --color-border: #2a2a30;
+  --color-border-light: #34343c;
+  --font-sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-pixel: "Press Start 2P", monospace;
+}
+
+/* ---- Themes ------------------------------------------------------------
+   Tailwind compiles every colour utility down to `var(--color-…)`, so
+   redefining those variables on <html data-theme="…"> re-skins the whole app
+   without touching a single component. Dark is the default (see @theme).
+
+   NOTE: never write a bare asterisk-slash inside these comments - it closes
+   the comment early and silently eats the rule that follows. */
+
+:root[data-theme="blue"] {
+  --color-accent: #4c9eff;
+  --color-accent-hover: #3b8ce8;
+  --color-accent-pressed: #2a76c8;
+  --color-accent-fg: #04101f;
+  --color-bg: #0b111d;
+  --color-bg-sidebar: #070c15;
+  --color-bg-elevated: #131c2c;
+  --color-bg-card: #172134;
+  --color-bg-card-hover: #1e2a42;
+  --color-border: #233149;
+  --color-border-light: #2f4060;
+}
+
+:root[data-theme="green"] {
+  --color-accent: #3ae07a;
+  --color-accent-hover: #2bc566;
+  --color-accent-pressed: #1fa553;
+  --color-accent-fg: #04140a;
+  --color-bg: #0a1210;
+  --color-bg-sidebar: #060d0b;
+  --color-bg-elevated: #111e18;
+  --color-bg-card: #15241c;
+  --color-bg-card-hover: #1c3126;
+  --color-border: #21362a;
+  --color-border-light: #2c4a38;
+}
+
+/* Light: a daylight amethyst skin. Every surface flips, and so does the zinc
+   text ramp the components use - so "text-zinc-100" (a near-white heading on
+   dark) becomes a near-black one here. The neutrals carry a slight violet
+   tint so white cards read as cards rather than as holes in the page, and
+   the accent darkens, because a neon that reads fine on black is unreadable
+   on white. */
+:root[data-theme="light"] {
+  --color-accent: #6d28d9;
+  --color-accent-hover: #5b21b6;
+  --color-accent-pressed: #4c1d95;
+  --color-accent-fg: #ffffff;
+
+  /* Surfaces, darkest rail to brightest card - the mirror of the dark ramp.
+     bg-elevated sits *below* bg-card on purpose: inputs and chips live on
+     white cards, so they need to read as inset, not raised. */
+  --color-bg: #f4f2fa;
+  --color-bg-sidebar: #e5e0f0;
+  --color-bg-elevated: #eae5f5;
+  --color-bg-card: #ffffff;
+  --color-bg-card-hover: #f5f2fc;
+  --color-border: #ddd6ec;
+  --color-border-light: #c4bade;
+
+  --color-zinc-50: #140f1f;
+  --color-zinc-100: #1c1529;
+  --color-zinc-200: #2b2340;
+  --color-zinc-300: #423a57;
+  --color-zinc-400: #574d6e;
+  --color-zinc-500: #6b6184;
+  --color-zinc-600: #7d7398;
+  --color-zinc-700: #cbc3dc;
+  --color-zinc-800: #ded8ec;
+  --color-zinc-900: #efecf7;
+
+  /* Status colours picked for dark backgrounds wash out on white. */
+  --color-emerald-300: #047857;
+  --color-emerald-400: #047857;
+  --color-emerald-500: #059669;
+  --color-red-400: #dc2626;
+  --color-red-500: #dc2626;
+  --color-red-600: #b91c1c;
+  --color-amber-400: #b45309;
+  --color-orange-400: #c2410c;
+  --color-orange-500: #ea580c;
+
+  --pixel-edge: rgba(46, 26, 84, 0.16);
+}
+
+/* Tailwind bakes shadow and overlay colours in as plain black, which on a
+   white page reads as soot rather than depth. These two overrides re-tint
+   them violet and lighten them; they are the only place the light theme
+   needs to reach past a variable. (--tw-shadow-color is declared
+   inherits:false by Tailwind, so it cannot be set from :root instead.) */
+:root[data-theme="light"] .shadow-2xl {
+  box-shadow: 0 18px 44px -18px rgba(47, 26, 88, 0.3), 0 3px 10px -4px rgba(47, 26, 88, 0.12);
+}
+
+:root[data-theme="light"] .shadow,
+:root[data-theme="light"] .shadow-lg {
+  box-shadow: 0 6px 18px -8px rgba(47, 26, 88, 0.25);
+}
+
+:root[data-theme="light"] .bg-black\/60 {
+  background-color: rgba(36, 21, 66, 0.42);
+}
+
+:root[data-theme="light"] ::selection {
+  background: rgba(109, 40, 217, 0.2);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* The window is transparent (tauri.conf.json), so the page itself must be too
+   - otherwise the corners outside the rounded #root would paint solid.
+   clip-path (rather than overflow:hidden) is what rounds the window, because
+   it also clips position:fixed children like the modal backdrops. */
+html,
+body {
+  background: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+#root {
+  background: var(--color-bg-sidebar);
+  clip-path: inset(0 round 12px);
+}
+
+/* A maximized window fills the screen edge to edge, so square it off. */
+:root[data-maximized] #root {
+  clip-path: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-light) transparent;
+}
+
+input[type="range"] {
+  accent-color: var(--color-accent);
+}
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.pixel-button {
+  border: 1px solid var(--pixel-edge, rgba(0, 0, 0, 0.45));
+  box-shadow: 0 2px 0 var(--pixel-edge, rgba(0, 0, 0, 0.45));
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+}
+
+.pixel-button:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.pixel-button:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+}
+
+/* ---- Skins page ---------------------------------------------------------
+   The stage sits behind a transparent 3D canvas, so the backdrop is plain
+   CSS and follows whichever theme is active through the colour variables. */
+.pixelated {
+  image-rendering: pixelated;
+}
+
+.skin-stage {
+  background: var(--color-bg-elevated);
+}
+
+.skin-stage[data-bg="stage"] {
+  background:
+    radial-gradient(ellipse 42% 6% at 50% 90%, color-mix(in srgb, var(--color-accent) 42%, transparent), transparent 72%),
+    radial-gradient(ellipse 70% 60% at 50% 38%, color-mix(in srgb, var(--color-accent) 20%, transparent), transparent 75%),
+    linear-gradient(to bottom, var(--color-bg-elevated), var(--color-bg-card));
+}
+
+.skin-stage[data-bg="grid"] {
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-border-light) 55%, transparent) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, color-mix(in srgb, var(--color-border-light) 55%, transparent) 1px, transparent 1px) 0 0 / 28px 28px,
+    var(--color-bg-elevated);
+}
+
+.skin-checker {
+  background:
+    conic-gradient(var(--color-border) 25%, transparent 25% 50%, var(--color-border) 50% 75%, transparent 75%) 0 0 / 16px 16px,
+    var(--color-bg-elevated);
+}
+
+/* ---- Shared motion ------------------------------------------------------
+   Plain CSS keyframes for things that appear in bulk (result cards) or loop
+   forever (indeterminate bars): they run on the compositor, where a framer
+   animation per element would run in JS every frame. */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-up {
+  animation: fade-up 0.22s ease-out both;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Activity hides a page with display:none; showing it again restarts this. */
+.page-enter {
+  animation: page-enter 0.16s ease-out;
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.indeterminate-bar {
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .page-enter,
+  .indeterminate-bar {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skin-stage * {
+    transition: none !important;
+  }
+}

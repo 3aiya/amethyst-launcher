@@ -1,0 +1,53 @@
+name: Release Amethyst Launcher
+
+# Disabled as an automatic trigger: build-release.ps1 builds,
+# signs and publishes the release locally and pushes the tag itself. Running on
+# "push: tags" as well would produce a second build on top of it.
+# Still runnable by hand from the Actions tab if the local build is unavailable.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. v1.1.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and Release Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        with:
+          tagName: ${{ inputs.tag }}
+          releaseName: "Amethyst Launcher ${{ inputs.tag }}"
+          releaseBody: "New Amethyst Launcher release."
+          releaseDraft: false
+          prerelease: false
