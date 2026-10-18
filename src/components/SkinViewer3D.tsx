@@ -10,6 +10,8 @@ export interface SkinViewerHandle {
   screenshot: () => string | null;
   resetCamera: () => void;
   zoomBy: (delta: number) => void;
+  /** Turns the model around its vertical axis, in radians. */
+  rotateBy: (radians: number) => void;
 }
 
 interface SkinViewer3DProps {
@@ -113,10 +115,20 @@ const SkinViewer3D = forwardRef<SkinViewerHandle, SkinViewer3DProps>(function Sk
       viewer.render();
       return viewer.canvas.toDataURL("image/png");
     },
-    resetCamera: () => viewerRef.current?.resetCameraPose(),
+    resetCamera: () => {
+      const viewer = viewerRef.current;
+      if (!viewer) return;
+      viewer.resetCameraPose();
+      // The turn buttons rotate the model itself, which the camera reset doesn't touch.
+      viewer.playerWrapper.rotation.y = 0;
+    },
     zoomBy: (delta) => {
       const viewer = viewerRef.current;
       if (viewer) viewer.zoom = Math.min(2.5, Math.max(0.3, viewer.zoom + delta));
+    },
+    rotateBy: (radians) => {
+      const viewer = viewerRef.current;
+      if (viewer) viewer.playerWrapper.rotation.y += radians;
     },
   }));
 
@@ -252,8 +264,10 @@ const SkinViewer3D = forwardRef<SkinViewerHandle, SkinViewer3DProps>(function Sk
   }, [nameTag]);
 
   return (
-    <div ref={containerRef} className={`relative h-full w-full ${className ?? ""}`}>
-      <canvas ref={canvasRef} className="block h-full w-full cursor-grab active:cursor-grabbing" />
+    <div ref={containerRef} className={`relative h-full min-h-0 w-full overflow-hidden ${className ?? ""}`}>
+      {/* Absolute so the pixel size skinview3d writes onto the canvas can't
+          push the container (and so the model) past the visible area. */}
+      <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full cursor-grab active:cursor-grabbing" />
       {loadError && (
         <div className="absolute inset-x-0 bottom-2 px-3 text-center text-[11px] text-red-400">
           Couldn't read that image - is it a valid 64x64 or 64x32 skin PNG?

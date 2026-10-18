@@ -2,32 +2,36 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Camera,
-  Check,
+  ChevronsDown,
   Columns2,
   Copy,
-  Download,
-  Grid3x3,
+  Footprints,
+  Hand,
   ImagePlus,
   Loader2,
   Maximize,
+  Pause,
   PersonStanding,
+  Plane,
+  Play,
   RotateCcw,
+  RotateCw,
   Shirt,
-  Undo2,
-  Upload,
+  Waves,
   Wind,
+  X,
+  Zap,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import SkinViewer3D, { type SkinViewerHandle } from "./SkinViewer3D";
 import type { SkinVariant } from "../types/global";
-import WardrobeTab from "./skins/WardrobeTab";
+import WardrobeStrip from "./skins/WardrobeStrip";
+import SkinHero from "./skins/SkinHero";
 import AddTab from "./skins/AddTab";
 import CapesTab from "./skins/CapesTab";
 import ModelTab from "./skins/ModelTab";
-import SceneTab from "./skins/SceneTab";
-import TextureTab from "./skins/TextureTab";
 import { FOCUS, IconButton } from "./skins/ui";
 import { readWornId, useWardrobe, writeWornId } from "./skins/useWardrobe";
 import {
@@ -35,6 +39,7 @@ import {
   type CapeChoice,
   type CapeView,
   type SceneSettings,
+  type SkinAnimationKind,
   type SkinInfo,
   type StageSkin,
   type WardrobeSkin,
@@ -68,15 +73,22 @@ interface SkinsPageProps {
   statusMessage: string;
 }
 
-type TabId = "wardrobe" | "add" | "capes" | "model" | "scene" | "texture";
+const POSES: { id: SkinAnimationKind; label: string; icon: typeof PersonStanding }[] = [
+  { id: "idle", label: "Idle", icon: PersonStanding },
+  { id: "walk", label: "Walk", icon: Footprints },
+  { id: "run", label: "Run", icon: Wind },
+  { id: "fly", label: "Fly", icon: Plane },
+  { id: "wave", label: "Wave", icon: Hand },
+  { id: "crouch", label: "Sneak", icon: ChevronsDown },
+  { id: "hit", label: "Hit", icon: Zap },
+  { id: "swim", label: "Swim", icon: Waves },
+];
+
+type TabId = "style" | "capes";
 
 const TABS: { id: TabId; label: string; icon: typeof Shirt }[] = [
-  { id: "wardrobe", label: "Wardrobe", icon: Shirt },
-  { id: "add", label: "Add", icon: ImagePlus },
+  { id: "style", label: "Style", icon: Shirt },
   { id: "capes", label: "Capes", icon: Wind },
-  { id: "model", label: "Model", icon: PersonStanding },
-  { id: "scene", label: "Scene", icon: Camera },
-  { id: "texture", label: "Texture", icon: Grid3x3 },
 ];
 
 interface Equipped {
@@ -106,7 +118,8 @@ export default function SkinsPage({
   const { add: addToWardrobe } = wardrobe;
   const accountKey = `${isMicrosoftAccount ? "ms" : "offline"}:${accountUuid ?? "none"}`;
 
-  const [tab, setTab] = useState<TabId>("wardrobe");
+  const [tab, setTab] = useState<TabId>("style");
+  const [addOpen, setAddOpen] = useState(false);
   const [scene, setScene] = useState<SceneSettings>(DEFAULT_SCENE);
   const [wornId, setWornId] = useState<string | null>(() => readWornId(accountKey));
   const [equipped, setEquipped] = useState<Equipped>({
@@ -128,7 +141,6 @@ export default function SkinsPage({
   const [detectedVariant, setDetectedVariant] = useState<SkinVariant | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -220,6 +232,10 @@ export default function SkinsPage({
     [wornLabel, equipped.variant, equipped.data, equipped.cape]
   );
 
+  // The worn wardrobe entry, read inside callbacks without re-creating them.
+  const wornIdRef = useRef<string | null>(null);
+  wornIdRef.current = wornSkin && wornSkin.variant === equipped.variant ? wornSkin.id : null;
+
   const shown = stage ?? equippedStage;
   const previewing = stage !== null;
   const stageHash = useMemo(() => (stage?.data ? hashString(stage.data) : null), [stage?.data]);
@@ -266,6 +282,10 @@ export default function SkinsPage({
   }, [canCompare]);
 
   const selectWardrobeSkin = useCallback((skin: WardrobeSkin, cape?: string | null) => {
+    if (!cape && skin.id === wornIdRef.current) {
+      setStage(null);
+      return;
+    }
     setStage({ id: skin.id, name: skin.name, variant: skin.variant, data: skin.data, cape: cape ?? null, source: skin.source });
     // A cape that comes with the skin (from a player lookup) takes the stage; a
     // cape picked from the account survives switching skins.
@@ -278,7 +298,9 @@ export default function SkinsPage({
       setStage({ ...stage, variant });
       if (stage.id) wardrobe.update(stage.id, { variant });
     } else {
-      setStage({ ...equippedStage, variant });
+      // Keep the wardrobe link, so the change is saved and the tile stays selected.
+      setStage({ ...equippedStage, id: wornSkin?.id, source: wornSkin?.source ?? equippedStage.source, variant });
+      if (wornSkin) wardrobe.update(wornSkin.id, { variant });
     }
   }
 
@@ -321,7 +343,7 @@ export default function SkinsPage({
       }
       if (last) {
         selectWardrobeSkin(last);
-        setTab("wardrobe");
+        setAddOpen(false);
       }
       if (problems.length > 0) {
         flash(problems[0] + (problems.length > 1 ? ` (+${problems.length - 1} more)` : ""), "error");
@@ -352,8 +374,12 @@ export default function SkinsPage({
   );
 
   async function pickFiles() {
-    const files = await window.amethyst.dialogs.pickFiles([{ name: "PNG images", extensions: ["png"] }]);
-    if (files.length > 0) await addPaths(files);
+    try {
+      const files = await window.amethyst.dialogs.pickFiles([{ name: "PNG images", extensions: ["png"] }]);
+      if (files.length > 0) await addPaths(files);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Couldn't open the file picker.", "error");
+    }
   }
 
   async function lookupPlayer(query: string): Promise<boolean> {
@@ -367,7 +393,7 @@ export default function SkinsPage({
       const data = toDataUrl(result.skin);
       const { skin, duplicate } = await addFromDataUrl(data, result.name, `player ${result.name}`, result.variant);
       selectWardrobeSkin(skin, result.cape ? toDataUrl(result.cape) : null);
-      setTab("wardrobe");
+      setAddOpen(false);
       flash(duplicate ? `${result.name}'s skin is already in your wardrobe.` : `Added ${result.name}'s skin.`, "ok");
       return true;
     } catch (e) {
@@ -399,9 +425,9 @@ export default function SkinsPage({
   // ---- Capes ---------------------------------------------------------------------
 
   async function pickCape() {
-    const files = await window.amethyst.dialogs.pickFiles([{ name: "Cape PNG", extensions: ["png"] }]);
-    if (files.length === 0) return;
     try {
+      const files = await window.amethyst.dialogs.pickFiles([{ name: "Cape PNG", extensions: ["png"] }]);
+      if (files.length === 0) return;
       const data = toDataUrl(await window.amethyst.fs.readFileBase64(files[0]));
       assertCapeSize(await loadImage(data));
       setCapeChoice({ kind: "file", data });
@@ -448,8 +474,8 @@ export default function SkinsPage({
   // Fetched the first time the tab is opened - no point spending a profile
   // request and a few texture downloads on players who never look at capes.
   useEffect(() => {
-    if (tab === "capes" && capesState === "idle") void loadCapes();
-  }, [tab, capesState, loadCapes]);
+    if (capesState === "idle" && (tab === "capes" || equipped.cape)) void loadCapes();
+  }, [tab, capesState, loadCapes, equipped.cape]);
 
   /** Puts the selected cape on the account itself, or takes the cape off. */
   async function applyCape() {
@@ -542,7 +568,6 @@ export default function SkinsPage({
   }
 
   async function resetSkin() {
-    setConfirmReset(false);
     setApplying(true);
     try {
       const ok = await onReset();
@@ -581,23 +606,46 @@ export default function SkinsPage({
     }
   }
 
-  const nameTag = scene.showNameTag ? shown.name : null;
-  const stageStyleKey = scene.background;
-  const selectedWardrobeId = stage?.id ?? null;
+
+  // Escape closes the Add dialog, like the launcher's other modals.
+  useEffect(() => {
+    if (!addOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setAddOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [addOpen]);
+
+  const selectedWardrobeId = stage?.id ?? (!previewing ? (wornSkin?.id ?? null) : null);
+  const stageWardrobeSkin = stage?.id ? (wardrobe.skins.find((s) => s.id === stage.id) ?? null) : !previewing ? wornSkin : null;
   const unsavedWorn =
     equippedHash && !wornMatchesWardrobe && ![...wardrobeHashes.values()].includes(equippedHash)
-      ? { sprite: equipped.sprite, variant: equipped.variant }
+      ? { sprite: equipped.sprite }
       : null;
 
-  const statusLabel = previewing
+  const eyebrow = previewing
     ? sameAsWorn
-      ? `Wearing ${shown.name}`
-      : `Trying on ${shown.name}`
+      ? "Now wearing"
+      : "Trying on"
     : equipped.loading
       ? "Loading your skin"
-      : equipped.data
-        ? `Wearing ${wornLabel}`
-        : "Wearing the default skin";
+      : "Now wearing";
+
+  const capeLabel =
+    !capeUrl || !scene.cape
+      ? null
+      : capeChoice.kind === "file"
+        ? "Custom PNG"
+        : capeChoice.kind === "owned"
+          ? (ownedCape?.name ?? "Selected")
+          : stage?.cape
+            ? "Player's"
+            : (capes.find((c) => c.active)?.name ?? "Worn");
+
+  const note =
+    statusMessage ||
+    (isMicrosoftAccount
+      ? "Try skins on before you wear them. Nothing changes on your account until you press Wear skin."
+      : "Your skin is loaded by the CustomSkinLoader mod, which the launcher adds to Fabric and Forge profiles. You'll see it everywhere, including servers, but other players won't. Vanilla profiles show the default skin.");
 
   const viewerProps = {
     animation: scene.animation,
@@ -605,117 +653,115 @@ export default function SkinsPage({
     paused: scene.paused,
     autoRotate: scene.autoRotate,
     overlays: scene.overlays,
-    background: scene.background,
     showCape: scene.cape,
     elytra: scene.elytra,
   } as const;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col gap-4 p-6">
-      <header className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-zinc-50">Skins</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-snug text-zinc-500">
-            {isMicrosoftAccount
-              ? "Try skins on before you wear them. Nothing changes on your account until you press Wear this skin."
-              : "Your skin is loaded by the CustomSkinLoader mod, which the launcher adds to Fabric and Forge profiles. You'll see it everywhere, including servers, but other players won't. Vanilla profiles can't load mods, so they show the default skin."}
-          </p>
-        </div>
-      </header>
+    <div className="relative flex h-full min-h-0 flex-col gap-4 p-5">
+      <div className="flex min-h-0 flex-1 gap-5">
+        {/* ---- What's on stage, and the button that wears it ---- */}
+        <SkinHero
+          eyebrow={eyebrow}
+          name={shown.name}
+          skin={stageWardrobeSkin}
+          variant={shown.variant}
+          size={info ? `${info.width} × ${info.height}` : null}
+          usesOverlay={info?.usesOverlay ?? null}
+          capeLabel={capeLabel}
+          loading={equipped.loading && !previewing}
+          isMicrosoftAccount={isMicrosoftAccount}
+          previewing={previewing && !sameAsWorn}
+          sameAsWorn={sameAsWorn}
+          canWear={previewing && !sameAsWorn && Boolean(stage?.data) && !applying}
+          applying={applying}
+          canReset={!applying && (isMicrosoftAccount || Boolean(equipped.data))}
+          hasImage={Boolean(shown.data)}
+          canSaveWorn={!previewing && Boolean(unsavedWorn)}
+          note={note}
+          onWear={() => void wearSkin()}
+          onBackToWorn={() => {
+            setStage(null);
+            setCapeChoice({ kind: "account" });
+          }}
+          onRename={(name) => {
+            if (!stageWardrobeSkin) return;
+            wardrobe.update(stageWardrobeSkin.id, { name });
+            setStage((s) => (s && s.id === stageWardrobeSkin.id ? { ...s, name } : s));
+          }}
+          onToggleFavorite={() => {
+            if (stageWardrobeSkin) wardrobe.update(stageWardrobeSkin.id, { favorite: !stageWardrobeSkin.favorite });
+          }}
+          onDelete={() => {
+            if (!stageWardrobeSkin) return;
+            const id = stageWardrobeSkin.id;
+            wardrobe.remove(id);
+            if (stage?.id === id) setStage(null);
+            if (wornId === id) {
+              setWornId(null);
+              writeWornId(accountKey, null);
+            }
+          }}
+          onSavePng={() => savePng(shown.data, shown.name)}
+          onCopyPng={() => void copyPng(shown.data)}
+          onSaveWorn={() => void saveWornToWardrobe()}
+          onReset={() => void resetSkin()}
+        />
 
-      <div className="flex min-h-0 flex-1 gap-4">
         {/* ---- Stage ---- */}
-        <section
-          aria-label="Skin preview"
-          data-bg={stageStyleKey}
-          className="skin-stage relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-border"
-        >
-          <div className={`absolute inset-0 grid ${compare ? "grid-cols-2" : "grid-cols-1"}`}>
-            {compare && (
-              <div className="relative border-r border-border/60">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {/* No frame: the model stands straight on the page, with only a soft glow behind it. */}
+          <section aria-label="Skin preview" className="relative min-h-0 flex-1">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background:
+                  "radial-gradient(ellipse 38% 46% at 50% 48%, color-mix(in srgb, var(--color-accent) 9%, transparent), transparent 70%)",
+              }}
+            />
+            <div className={`absolute inset-0 grid ${compare ? "grid-cols-2" : "grid-cols-1"}`}>
+              {compare && (
+                <div className="relative border-r border-border">
+                  <SkinViewer3D
+                    {...viewerProps}
+                    skinUrl={equipped.data ?? mannequinUrl()}
+                    model={equipped.variant === "slim" ? "slim" : "default"}
+                    capeUrl={equipped.cape}
+                  />
+                  <span className="absolute left-3 top-3 rounded-md bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
+                    Wearing now
+                  </span>
+                </div>
+              )}
+              <div className="relative">
                 <SkinViewer3D
+                  ref={viewerRef}
                   {...viewerProps}
-                  skinUrl={equipped.data ?? mannequinUrl()}
-                  model={equipped.variant === "slim" ? "slim" : "default"}
-                  capeUrl={equipped.cape}
-                  nameTag={scene.showNameTag ? wornLabel : null}
+                  skinUrl={skinUrl}
+                  model={shown.variant === "slim" ? "slim" : "default"}
+                  capeUrl={capeUrl}
                 />
-                <span className="absolute left-3 top-14 rounded-md bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
-                  Wearing now
-                </span>
+                {compare && (
+                  <span className="absolute left-3 top-3 rounded-md bg-accent px-2 py-0.5 text-[11px] font-bold text-accent-fg">
+                    Trying on
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {equipped.loading && !previewing && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 size={26} className="animate-spin text-zinc-500" />
               </div>
             )}
-            <div className="relative">
-              <SkinViewer3D
-                ref={viewerRef}
-                {...viewerProps}
-                skinUrl={skinUrl}
-                model={shown.variant === "slim" ? "slim" : "default"}
-                capeUrl={capeUrl}
-                nameTag={nameTag}
-              />
-              {compare && (
-                <span className="absolute right-3 top-14 rounded-md bg-accent px-2 py-0.5 text-[11px] font-bold text-accent-fg">
-                  Trying on
-                </span>
-              )}
-            </div>
-          </div>
 
-          {equipped.loading && !previewing && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <Loader2 size={26} className="animate-spin text-zinc-300" />
-            </div>
-          )}
-
-          {/* Top bar */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
-            <span
-              className="pointer-events-auto max-w-[70%] truncate rounded-lg bg-black/70 px-2.5 py-1.5 text-xs font-medium text-white"
-              aria-live="polite"
+            {/* Camera and capture tools, out of the way in the corner. */}
+            <div
+              className="absolute right-0 top-0 flex flex-col items-center gap-0.5 rounded-xl border border-border bg-bg-card p-1"
+              role="toolbar"
+              aria-label="Preview controls"
             >
-              {statusLabel}
-            </span>
-            {previewing && (
-              <button
-                type="button"
-                onClick={() => {
-                  setStage(null);
-                  setCapeChoice({ kind: "account" });
-                }}
-                className={`pointer-events-auto flex items-center gap-1.5 rounded-lg bg-black/70 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-black/85 ${FOCUS}`}
-              >
-                <Undo2 size={13} /> Back to worn skin
-              </button>
-            )}
-          </div>
-
-          {/* Toast */}
-          <AnimatePresence>
-            {notice && (
-              <motion.div
-                key={notice.text}
-                role="status"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-                className={`absolute inset-x-0 bottom-16 mx-auto w-fit max-w-[88%] rounded-lg px-3 py-2 text-xs font-medium shadow-lg ${
-                  notice.tone === "error"
-                    ? "bg-red-500 text-white"
-                    : notice.tone === "ok"
-                      ? "bg-accent text-accent-fg"
-                      : "bg-black/75 text-white"
-                }`}
-              >
-                {notice.text}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Toolbar */}
-          <div className="absolute inset-x-0 bottom-3 flex justify-center">
-            <div className="flex items-center gap-0.5 rounded-xl bg-black/70 p-1 text-white" role="toolbar" aria-label="Preview controls">
               <IconButton label="Zoom in" onClick={() => viewerRef.current?.zoomBy(0.15)}>
                 <ZoomIn size={15} />
               </IconButton>
@@ -725,7 +771,7 @@ export default function SkinsPage({
               <IconButton label="Reset camera" onClick={() => viewerRef.current?.resetCamera()}>
                 <Maximize size={15} />
               </IconButton>
-              <span className="mx-1 h-5 w-px bg-white/20" />
+              <span className="my-0.5 h-px w-5 bg-border" />
               <IconButton
                 label={canCompare ? "Compare with worn skin" : "Compare (try on a different skin first)"}
                 active={compare}
@@ -741,28 +787,120 @@ export default function SkinsPage({
                 <Camera size={15} />
               </IconButton>
             </div>
+
+            <p className="pointer-events-none absolute bottom-0 left-0 text-[10px] text-zinc-600">
+              Drag to turn · scroll to zoom
+            </p>
+
+            {/* Toast */}
+            <AnimatePresence>
+              {notice && (
+                <motion.div
+                  key={notice.text}
+                  role="status"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className={`absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[80%] rounded-lg px-3 py-2 text-xs font-medium shadow-lg ${
+                    notice.tone === "error"
+                      ? "bg-red-500 text-white"
+                      : notice.tone === "ok"
+                        ? "bg-accent text-accent-fg"
+                        : "bg-black/75 text-white"
+                  }`}
+                >
+                  {notice.text}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Drop overlay */}
+            <AnimatePresence>
+              {dragging && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-bg/85"
+                >
+                  <p className="flex items-center gap-2 text-sm font-semibold text-accent">
+                    <ImagePlus size={18} /> Drop PNG skins to add them
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+
+          {/* Pose bar: turn the model, pick what it's doing. */}
+          <div className="flex shrink-0 items-center justify-center gap-1.5" role="toolbar" aria-label="Pose">
+            <button
+              type="button"
+              aria-label="Turn left"
+              title="Turn left"
+              onClick={() => viewerRef.current?.rotateBy(-Math.PI / 4)}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border border-border-light bg-bg-card text-zinc-400 transition-colors hover:border-accent hover:text-accent ${FOCUS}`}
+            >
+              <RotateCcw size={15} />
+            </button>
+            <div className="flex items-center gap-0.5 rounded-full border border-border-light bg-bg-card p-1">
+              {POSES.map((pose) => {
+                const Icon = pose.icon;
+                const active = scene.animation === pose.id;
+                return (
+                  <button
+                    key={pose.id}
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={pose.label}
+                    title={pose.label}
+                    onClick={() => patchScene({ animation: pose.id, paused: false })}
+                    className={`relative flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors ${FOCUS} ${
+                      active ? "text-accent-fg" : "text-zinc-400 hover:text-zinc-100"
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="skins-pose-pill"
+                        className="absolute inset-0 rounded-full bg-accent"
+                        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                      />
+                    )}
+                    <Icon size={14} className="relative z-10" />
+                    {active && <span className="relative z-10">{pose.label}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              aria-label={scene.paused ? "Play pose" : "Freeze pose"}
+              title={scene.paused ? "Play pose" : "Freeze pose"}
+              aria-pressed={scene.paused}
+              onClick={() => patchScene({ paused: !scene.paused })}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${FOCUS} ${
+                scene.paused
+                  ? "border-accent bg-accent/15 text-accent"
+                  : "border-border-light bg-bg-card text-zinc-400 hover:border-accent hover:text-accent"
+              }`}
+            >
+              {scene.paused ? <Play size={14} /> : <Pause size={14} />}
+            </button>
+            <button
+              type="button"
+              aria-label="Turn right"
+              title="Turn right"
+              onClick={() => viewerRef.current?.rotateBy(Math.PI / 4)}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border border-border-light bg-bg-card text-zinc-400 transition-colors hover:border-accent hover:text-accent ${FOCUS}`}
+            >
+              <RotateCw size={15} />
+            </button>
           </div>
+        </div>
 
-          {/* Drop overlay */}
-          <AnimatePresence>
-            {dragging && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-bg/85"
-              >
-                <p className="flex items-center gap-2 text-sm font-semibold text-accent">
-                  <ImagePlus size={18} /> Drop PNG skins to add them
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </section>
-
-        {/* ---- Side panel ---- */}
-        <aside className="flex min-h-0 w-[320px] shrink-0 flex-col rounded-2xl border border-border bg-bg-card xl:w-[360px]">
-          <div role="tablist" aria-label="Skin tools" className="flex gap-0.5 border-b border-border p-1.5">
+        {/* ---- Settings ---- */}
+        <aside className="flex min-h-0 w-[280px] shrink-0 flex-col rounded-2xl border border-border bg-bg-card xl:w-[310px]">
+          <div role="tablist" aria-label="Skin settings" className="flex gap-0.5 border-b border-border p-1.5">
             {TABS.map((t) => {
               const Icon = t.icon;
               const active = tab === t.id;
@@ -773,7 +911,7 @@ export default function SkinsPage({
                   role="tab"
                   aria-selected={active}
                   onClick={() => setTab(t.id)}
-                  className={`relative flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition-colors ${FOCUS} ${
+                  className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] font-medium transition-colors ${FOCUS} ${
                     active ? "text-accent" : "text-zinc-500 hover:text-zinc-200"
                   }`}
                 >
@@ -784,7 +922,7 @@ export default function SkinsPage({
                       transition={{ type: "spring", stiffness: 380, damping: 32 }}
                     />
                   )}
-                  <Icon size={15} className="relative z-10" />
+                  <Icon size={14} className="relative z-10" />
                   <span className="relative z-10">{t.label}</span>
                 </button>
               );
@@ -792,39 +930,15 @@ export default function SkinsPage({
           </div>
 
           <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-4">
-            {tab === "wardrobe" && (
-              <WardrobeTab
-                skins={wardrobe.skins}
-                wornId={wornSkin?.id ?? null}
-                selectedId={selectedWardrobeId}
-                unsavedWorn={unsavedWorn}
-                unsavedWornSelected={!previewing && Boolean(unsavedWorn)}
-                onSelect={(skin) => selectWardrobeSkin(skin)}
-                onSelectUnsavedWorn={() => setStage(null)}
-                onSaveUnsavedWorn={() => void saveWornToWardrobe()}
-                onRename={(id, name) => {
-                  wardrobe.update(id, { name });
-                  setStage((s) => (s && s.id === id ? { ...s, name } : s));
-                }}
-                onToggleFavorite={(id) => {
-                  const skin = wardrobe.skins.find((s) => s.id === id);
-                  if (skin) wardrobe.update(id, { favorite: !skin.favorite });
-                }}
-                onDelete={(id) => {
-                  wardrobe.remove(id);
-                  if (stage?.id === id) setStage(null);
-                  if (wornId === id) {
-                    setWornId(null);
-                    writeWornId(accountKey, null);
-                  }
-                }}
-                onSavePng={(skin) => savePng(skin.data, skin.name)}
-                onCopyPng={(skin) => void copyPng(skin.data)}
-                onGoAdd={() => setTab("add")}
+            {tab === "style" && (
+              <ModelTab
+                variant={shown.variant}
+                detectedVariant={detectedVariant}
+                scene={scene}
+                hasCape={Boolean(capeUrl)}
+                onVariant={changeVariant}
+                onScene={patchScene}
               />
-            )}
-            {tab === "add" && (
-              <AddTab busy={lookupBusy} accountName={accountName} onPickFiles={() => void pickFiles()} onLookup={lookupPlayer} />
             )}
             {tab === "capes" && (
               <CapesTab
@@ -843,92 +957,59 @@ export default function SkinsPage({
                 onClearFile={() => setCapeChoice({ kind: "account" })}
               />
             )}
-            {tab === "model" && (
-              <ModelTab
-                variant={shown.variant}
-                detectedVariant={detectedVariant}
-                scene={scene}
-                hasCape={Boolean(capeUrl)}
-                onVariant={changeVariant}
-                onScene={patchScene}
-              />
-            )}
-            {tab === "scene" && <SceneTab scene={scene} onScene={patchScene} />}
-            {tab === "texture" && (
-              <TextureTab
-                src={shown.data}
-                info={info}
-                variant={shown.variant}
-                onSavePng={() => savePng(shown.data, shown.name)}
-                onFlash={flash}
-              />
-            )}
-          </div>
-
-          {/* Apply bar */}
-          <div className="border-t border-border p-4">
-            {confirmReset ? (
-              <div className="flex items-center gap-2">
-                <p className="flex-1 text-xs text-zinc-300">
-                  {isMicrosoftAccount ? "Remove your custom skin from your account?" : "Remove your saved skin?"}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void resetSkin()}
-                  className={`rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600 ${FOCUS}`}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(false)}
-                  className={`rounded-lg border border-border-light px-3 py-2 text-xs font-medium text-zinc-300 hover:text-zinc-100 ${FOCUS}`}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void wearSkin()}
-                  disabled={!previewing || sameAsWorn || !stage?.data || applying}
-                  className={`flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-2.5 text-sm font-bold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-40 ${FOCUS}`}
-                >
-                  {applying ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : sameAsWorn ? (
-                    <Check size={15} />
-                  ) : isMicrosoftAccount ? (
-                    <Upload size={15} />
-                  ) : (
-                    <Download size={15} />
-                  )}
-                  {sameAsWorn ? "Already wearing this" : "Wear this skin"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(true)}
-                  disabled={applying || (!isMicrosoftAccount && !equipped.data)}
-                  title="Reset to the default skin"
-                  aria-label="Reset to the default skin"
-                  className={`flex items-center justify-center rounded-lg border border-border-light px-3 text-zinc-300 transition-colors hover:border-accent hover:text-accent disabled:opacity-40 ${FOCUS}`}
-                >
-                  <RotateCcw size={15} />
-                </button>
-              </div>
-            )}
-            <p className="mt-2 min-h-[16px] text-[11px] leading-snug text-zinc-500">
-              {statusMessage || (previewing ? "Only you can see this preview until you wear it." : "Pick a skin from your wardrobe to try it on.")}
-            </p>
           </div>
         </aside>
       </div>
 
-      <footer className="flex items-center justify-between text-[10px] text-zinc-600">
-        <span>Drag the model to turn it, scroll to zoom.</span>
-        <span>Developed by 3aiya</span>
-      </footer>
+      {/* ---- Wardrobe ---- */}
+      <WardrobeStrip
+        skins={wardrobe.skins}
+        wornId={wornSkin?.id ?? null}
+        selectedId={selectedWardrobeId}
+        unsavedWorn={unsavedWorn}
+        unsavedWornSelected={!previewing && Boolean(unsavedWorn)}
+        onSelect={(skin) => selectWardrobeSkin(skin)}
+        onSelectUnsavedWorn={() => setStage(null)}
+        onAdd={() => setAddOpen(true)}
+      />
+
+      {/* ---- Add dialog ---- */}
+      <AnimatePresence>
+        {addOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+            onMouseDown={(e) => e.target === e.currentTarget && setAddOpen(false)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Add a skin"
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18 }}
+              className="w-[420px] max-w-[92vw] rounded-2xl border border-border bg-bg-card p-5 shadow-2xl"
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-pixel text-[13px] text-zinc-50">Add a skin</h2>
+                <IconButton label="Close" onClick={() => setAddOpen(false)}>
+                  <X size={15} />
+                </IconButton>
+              </div>
+              <AddTab
+                busy={lookupBusy}
+                accountName={accountName}
+                onPickFiles={() => void pickFiles()}
+                onLookup={lookupPlayer}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

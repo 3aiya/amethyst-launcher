@@ -68,12 +68,67 @@ export function IconButton({
 
 export function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <section className="space-y-2">
+    <section className="space-y-2.5">
       <div>
-        <h3 className="text-xs font-semibold text-zinc-300">{title}</h3>
-        {hint && <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">{hint}</p>}
+        <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">{title}</h3>
+        {hint && <p className="mt-1 text-[11px] leading-snug text-zinc-500">{hint}</p>}
       </div>
       {children}
     </section>
+  );
+}
+
+/** A labelled on/off row - the settings-list look, one row per option. */
+export function SwitchRow({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center gap-3 border-b border-border py-2.5 text-left last:border-b-0 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS}`}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-zinc-200">{label}</span>
+        {hint && <span className="mt-0.5 block text-[10px] leading-snug text-zinc-500">{hint}</span>}
+      </span>
+      <span
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+          checked ? "bg-accent" : "bg-border-light"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${
+            checked ? "left-[18px]" : "left-0.5"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
+/** Small read-only fact about the skin, e.g. "Classic" or "64 x 64". */
+export function Chip({ children, accent }: { children: ReactNode; accent?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+        accent ? "border-accent/40 bg-accent/10 text-accent" : "border-border-light bg-bg-elevated text-zinc-300"
+      }`}
+    >
+      {children}
+    </span>
   );
 }

@@ -1,7 +1,6 @@
-import { Eye, EyeOff } from "lucide-react";
 import type { SkinVariant } from "../../types/global";
 import type { LayerKey, PartLayers, SceneSettings } from "./types";
-import { FOCUS, Group, Pill } from "./ui";
+import { FOCUS, Group, Pill, SwitchRow } from "./ui";
 
 const PARTS: { key: LayerKey; label: string }[] = [
   { key: "head", label: "Hat" },
@@ -32,14 +31,14 @@ export default function ModelTab(p: ModelTabProps) {
   }
 
   return (
-    <div className="space-y-5">
-      <Group title="Arm style" hint="Slim skins have 3-pixel arms. Pick the style the skin was drawn for.">
+    <div className="space-y-6">
+      <Group title="Arm style">
         <div className="grid grid-cols-2 gap-2">
           <Pill active={p.variant === "classic"} onClick={() => p.onVariant("classic")}>
-            Classic (Steve)
+            Classic
           </Pill>
           <Pill active={p.variant === "slim"} onClick={() => p.onVariant("slim")}>
-            Slim (Alex)
+            Slim
           </Pill>
         </div>
         {p.detectedVariant && p.detectedVariant !== p.variant && (
@@ -49,17 +48,15 @@ export default function ModelTab(p: ModelTabProps) {
         )}
       </Group>
 
-      <Group title="Outer layers" hint="Hat, jacket, sleeves and pants sit on top of the base skin.">
-        <div className="grid grid-cols-2 gap-2">
+      <Group title="Skin layers">
+        <div>
           {PARTS.map((part) => (
-            <Pill
+            <SwitchRow
               key={part.key}
-              active={p.scene.overlays[part.key]}
-              onClick={() => p.onScene({ overlays: { ...p.scene.overlays, [part.key]: !p.scene.overlays[part.key] } })}
-            >
-              {p.scene.overlays[part.key] ? <Eye size={12} /> : <EyeOff size={12} />}
-              {part.label}
-            </Pill>
+              label={part.label}
+              checked={p.scene.overlays[part.key]}
+              onChange={(value) => p.onScene({ overlays: { ...p.scene.overlays, [part.key]: value } })}
+            />
           ))}
         </div>
         <button
@@ -71,22 +68,21 @@ export default function ModelTab(p: ModelTabProps) {
         </button>
       </Group>
 
-      <Group title="Cape" hint="Which cape you wear is picked in the Capes tab - this is just what the preview shows.">
-        <div className="grid grid-cols-2 gap-2">
-          <Pill
-            active={p.scene.cape && p.hasCape}
+      <Group title="On your back">
+        <div>
+          <SwitchRow
+            label="Show cape"
+            hint={p.hasCape ? undefined : "No cape on this preview - pick one in Capes."}
+            checked={p.scene.cape && p.hasCape}
             disabled={!p.hasCape}
-            onClick={() => p.onScene({ cape: !p.scene.cape })}
-          >
-            Show cape
-          </Pill>
-          <Pill
-            active={p.scene.elytra && p.hasCape}
+            onChange={(value) => p.onScene({ cape: value })}
+          />
+          <SwitchRow
+            label="Elytra wings"
+            checked={p.scene.elytra && p.hasCape}
             disabled={!p.hasCape || !p.scene.cape}
-            onClick={() => p.onScene({ elytra: !p.scene.elytra })}
-          >
-            Elytra wings
-          </Pill>
+            onChange={(value) => p.onScene({ elytra: value })}
+          />
         </div>
       </Group>
     </div>
