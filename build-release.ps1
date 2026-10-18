@@ -2,47 +2,46 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
 
-    [switch]$SkipGit,
+    [switch]$ForceTag,
 
-    [switch]$ForceTag
+    [switch]$AllowDirty,
+
+    [switch]$NoWatch,
+
+    [switch]$BumpOnly
 )
 
 $ErrorActionPreference = "Stop"
 
 # ============================================================
 # AMETHYST LAUNCHER
-# Automated Local Release Builder
+# One-command release
 #
 # Usage:
-#   .\build-release.ps1 1.1.0
-#   .\build-release.ps1 1.1.0 -SkipGit      (no commit / push / tag)
-#   .\build-release.ps1 1.1.0 -ForceTag     (move an existing tag)
+#   .\build-release.ps1 1.2.0
+#   .\build-release.ps1 1.2.0 -ForceTag     (move an existing tag)
+#   .\build-release.ps1 1.2.0 -AllowDirty   (ignore uncommitted source changes)
+#   .\build-release.ps1 1.2.0 -NoWatch      (don't wait for the CI build)
+#   .\build-release.ps1 1.2.0 -BumpOnly     (only edit the version files)
 #
 # Automatically:
-#   1. Updates package.json
-#   2. Updates package-lock.json
-#   3. Updates tauri.conf.json
-#   4. Updates Cargo.toml
-#   5. Loads Tauri signing key
-#   6. Asks signing password
-#   7. Builds the launcher binary (without bundling)
-#   8. Bundles + signs the installers
-#   9. Finds MSI + MSI.sig
-#   10. Generates latest.json
-#   11. Creates/updates GitHub Release
-#   12. Uploads MSI + latest.json
-#   13. Commits + pushes the version files and the release tag
+#   1. Bumps the version in package.json, package-lock.json,
+#      tauri.conf.json, Cargo.toml and Cargo.lock
+#   2. Commits those files and pushes the branch
+#   3. Creates and pushes the release tag
+#   4. Watches the release workflow, which builds the launcher on a
+#      GitHub-hosted runner, has it code signed by SignPath, signs the
+#      updater manifest over the signed installer, and publishes the
+#      GitHub release with the MSI and latest.json
 #
-# The release commit only stages these version files:
-#   package.json, package-lock.json,
-#   src-tauri/tauri.conf.json, src-tauri/Cargo.toml, latest.json
-# Commit any source changes yourself before running a release.
+# Nothing is built or signed on this machine on purpose: the code signing
+# certificate is only issued to binaries that provably came out of the
+# release workflow in this repository. See CODE_SIGNING.md.
+#
+# For a local test build - unsigned, not published - run:
+#   npm run tauri -- build --bundles msi
 # ============================================================
 
-
-# ============================================================
-# COLORS / HEADER
-# ============================================================
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Cyan
@@ -61,7 +60,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     Write-Host "ERROR: Invalid version format." -ForegroundColor Red
     Write-Host ""
     Write-Host "Correct example:" -ForegroundColor Yellow
-    Write-Host "1.1.0"
+    Write-Host "1.2.0"
     Write-Host ""
 
     exit 1
@@ -82,59 +81,56 @@ $ProjectRoot = $PSScriptRoot
 
 $Repo = "3aiya/amethyst-launcher"
 
-$PackageJson = Join-Path `
-    $ProjectRoot `
-    "package.json"
+$Workflow = "release.yml"
 
-$PackageLock = Join-Path `
-    $ProjectRoot `
-    "package-lock.json"
+$PackageJson = Join-Path $ProjectRoot "package.json"
+$PackageLock = Join-Path $ProjectRoot "package-lock.json"
+$TauriConfig = Join-Path $ProjectRoot "src-tauri\tauri.conf.json"
+$CargoToml   = Join-Path $ProjectRoot "src-tauri\Cargo.toml"
+$CargoLock   = Join-Path $ProjectRoot "src-tauri\Cargo.lock"
 
-$TauriConfig = Join-Path `
-    $ProjectRoot `
-    "src-tauri\tauri.conf.json"
-
-$CargoToml = Join-Path `
-    $ProjectRoot `
-    "src-tauri\Cargo.toml"
-
-$KeyPath = Join-Path `
-    $env:USERPROFILE `
-    ".tauri\amethyst.key"
-
-$ReleaseDir = Join-Path `
-    $ProjectRoot `
-    "src-tauri\target\release"
-
-$BundlePath = Join-Path `
-    $ReleaseDir `
-    "bundle"
-
-$MsiPath = Join-Path `
-    $BundlePath `
-    "msi\Amethyst Launcher_${Version}_x64_en-US.msi"
-
-$SigPath = "$MsiPath.sig"
-
-$LatestJson = Join-Path `
-    $ProjectRoot `
-    "latest.json"
-
-
-# ============================================================
-# 3. CHECK FILES
-# ============================================================
-
-Write-Host "[1/14] Checking project files..." -ForegroundColor Cyan
-
-$RequiredFiles = @(
-    $PackageJson,
-    $TauriConfig,
-    $CargoToml,
-    $KeyPath
+# Everything this script is allowed to change. Staged by path, so a
+# half-finished feature in the working tree never rides along into a
+# release commit.
+$VersionFiles = @(
+    "package.json",
+    "package-lock.json",
+    "src-tauri/tauri.conf.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/Cargo.lock"
 )
 
-foreach ($File in $RequiredFiles) {
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+
+# ============================================================
+# 3. CHECK TOOLS AND FILES
+# ============================================================
+
+Write-Host "[1/8] Checking tools and project files..." -ForegroundColor Cyan
+
+foreach ($Tool in @("git", "gh", "npm")) {
+
+    if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
+
+        Write-Host ""
+        Write-Host "ERROR: $Tool is not installed or not on PATH." -ForegroundColor Red
+        Write-Host ""
+
+        exit 1
+    }
+}
+
+$Required = @(
+    $PackageJson,
+    $PackageLock,
+    $TauriConfig,
+    $CargoToml,
+    $CargoLock,
+    (Join-Path $ProjectRoot ".github\workflows\$Workflow")
+)
+
+foreach ($File in $Required) {
 
     if (-not (Test-Path $File)) {
 
@@ -147,24 +143,7 @@ foreach ($File in $RequiredFiles) {
     }
 }
 
-Write-Host "Project files OK." -ForegroundColor Green
-
-
-# ============================================================
-# 4. CHECK TAURI CONFIG BEFORE MODIFYING
-# ============================================================
-
-Write-Host ""
-Write-Host "[2/14] Validating tauri.conf.json..." -ForegroundColor Cyan
-
-$TauriContent = Get-Content `
-    $TauriConfig `
-    -Raw
-
-if ([string]::IsNullOrWhiteSpace($TauriContent)) {
-
-    throw "tauri.conf.json is empty."
-}
+$TauriContent = Get-Content $TauriConfig -Raw
 
 try {
 
@@ -173,290 +152,166 @@ try {
 }
 catch {
 
-    throw "tauri.conf.json is invalid JSON. Fix it before building."
+    throw "tauri.conf.json is invalid JSON. Fix it before releasing."
 }
 
-Write-Host "tauri.conf.json is valid." -ForegroundColor Green
+Write-Host "Tools and project files OK." -ForegroundColor Green
 
 
 # ============================================================
-# 4b. CLEAR A STALE RUST BUILD CACHE
-#
-# Cargo caches what each build script printed, absolute paths into
-# target/ included. Move or rename the project folder and those cached
-# paths still point at the old one, so the build dies with
-#
-#   failed to read plugin permissions: failed to read file
-#   '\\?\E:\...\permissions\app\autogenerated\commands\app_hide.toml'
-#   The system cannot find the path specified. (os error 3)
-#
-# Dropping just the build-script folders that still name the old path
-# makes Cargo re-run them against the current one. Everything in
-# target/ is regenerable, so nothing of value is lost - the affected
-# crates are simply rebuilt once.
+# 4. CHECK GIT AND GITHUB
 # ============================================================
 
 Write-Host ""
-Write-Host "[2b/14] Checking the Rust build cache..." -ForegroundColor Cyan
-
-$ExpectedTarget = Join-Path `
-    $ProjectRoot `
-    "src-tauri\target"
-
-$StaleDirs = New-Object System.Collections.Generic.List[string]
-
-$BuildRoots = @(
-    (Join-Path $ExpectedTarget "debug\build"),
-    (Join-Path $ExpectedTarget "release\build")
-) | Where-Object { Test-Path $_ }
-
-foreach ($BuildRoot in $BuildRoots) {
-
-    $OutputFiles = @(
-        Get-ChildItem `
-            -Path $BuildRoot `
-            -Directory `
-            -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName "output" } |
-            Where-Object { Test-Path $_ }
-    )
-
-    foreach ($OutputFile in $OutputFiles) {
-
-        $Text = Get-Content `
-            $OutputFile `
-            -Raw `
-            -ErrorAction SilentlyContinue
-
-        if ([string]::IsNullOrEmpty($Text)) {
-
-            continue
-        }
-
-        # Every drive-qualified path into a src-tauri\target the build
-        # script recorded. One that isn't under this project's target
-        # was written while the project lived somewhere else.
-        $Hits = [regex]::Matches(
-            $Text,
-            '([A-Za-z]:\\[^\r\n]*?\\src-tauri\\target\\)'
-        )
-
-        foreach ($Hit in $Hits) {
-
-            $IsCurrent = $Hit.Groups[1].Value.StartsWith(
-                ($ExpectedTarget + "\"),
-                [System.StringComparison]::OrdinalIgnoreCase
-            )
-
-            if (-not $IsCurrent) {
-
-                $StaleDirs.Add(
-                    (Split-Path $OutputFile -Parent)
-                )
-
-                break
-            }
-        }
-    }
-}
-
-$StaleDirs = @(
-    $StaleDirs |
-        Select-Object -Unique
-)
-
-if ($StaleDirs.Count -gt 0) {
-
-    Write-Host ""
-    Write-Host "$($StaleDirs.Count) build cache folder(s) are left over from an older project path." -ForegroundColor Yellow
-    Write-Host "Clearing them so Cargo rebuilds those crates against this one." -ForegroundColor Yellow
-    Write-Host ""
-
-    foreach ($Dir in $StaleDirs) {
-
-        Remove-Item `
-            $Dir `
-            -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue
-    }
-
-    Write-Host "Stale build cache cleared." -ForegroundColor Green
-    Write-Host "This build will take longer than usual - the cleared crates compile again." -ForegroundColor DarkGray
-
-}
-else {
-
-    Write-Host "Build cache OK." -ForegroundColor Green
-}
-
-
-# ============================================================
-# 5. CHECK GITHUB CLI
-# ============================================================
-
-Write-Host ""
-Write-Host "[3/14] Checking GitHub CLI..." -ForegroundColor Cyan
-
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-
-    Write-Host ""
-    Write-Host "GitHub CLI is not installed." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Install with:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "winget install --id GitHub.cli"
-    Write-Host ""
-
-    exit 1
-}
-
-Write-Host "GitHub CLI found." -ForegroundColor Green
-
-
-# ============================================================
-# 6. CHECK GITHUB AUTH
-# ============================================================
-
-Write-Host ""
-Write-Host "[4/14] Checking GitHub authentication..." -ForegroundColor Cyan
-
-$AuthOutput = gh auth status 2>&1
-
-if ($LASTEXITCODE -ne 0) {
-
-    Write-Host ""
-    Write-Host "GitHub authentication failed." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Run:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "gh auth login"
-    Write-Host ""
-
-    exit 1
-}
-
-Write-Host "GitHub authentication OK." -ForegroundColor Green
-
-
-# ============================================================
-# 6b. CHECK GIT REPOSITORY
-#
-# Checked here, before anything is modified, so a missing repo or
-# remote fails the run in a second instead of after a long build.
-# ============================================================
-
-Write-Host ""
-Write-Host "[5/14] Checking git repository..." -ForegroundColor Cyan
-
-$Branch = $null
-
-if ($SkipGit) {
-
-    Write-Host "Skipped (-SkipGit)." -ForegroundColor Yellow
-
-}
-else {
-
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-
-        Write-Host ""
-        Write-Host "git is not installed." -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Install it, or run with -SkipGit." -ForegroundColor Yellow
-        Write-Host ""
-
-        exit 1
-    }
-
-    Push-Location $ProjectRoot
-
-    try {
-
-        $OldErrorActionPreference = $ErrorActionPreference
-
-        try {
-
-            $ErrorActionPreference = "Continue"
-
-            git rev-parse --is-inside-work-tree *> $null
-
-            $InRepo = (
-                $LASTEXITCODE -eq 0
-            )
-
-        }
-        finally {
-
-            $ErrorActionPreference = $OldErrorActionPreference
-        }
-
-        if (-not $InRepo) {
-
-            Write-Host ""
-            Write-Host "This folder is not a git repository." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "Set it up once with:" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "git init -b main"
-            Write-Host "git remote add origin https://github.com/$Repo.git"
-            Write-Host "git fetch origin main"
-            Write-Host "git reset --mixed origin/main"
-            Write-Host ""
-            Write-Host "Or run with -SkipGit." -ForegroundColor Yellow
-            Write-Host ""
-
-            exit 1
-        }
-
-        $Branch = git symbolic-ref --short HEAD
-
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Branch)) {
-
-            throw "HEAD is detached. Check out a branch, or run with -SkipGit."
-        }
-
-        $Branch = $Branch.Trim()
-
-        $Remotes = @(git remote)
-
-        if ($Remotes -notcontains "origin") {
-
-            Write-Host ""
-            Write-Host "No 'origin' remote is configured." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "git remote add origin https://github.com/$Repo.git"
-            Write-Host ""
-
-            exit 1
-        }
-
-    }
-    finally {
-
-        Pop-Location
-    }
-
-    Write-Host "Git repository OK (branch: $Branch)." -ForegroundColor Green
-}
-
-
-# ============================================================
-# 7. UPDATE package.json
-# ============================================================
-
-Write-Host ""
-Write-Host "[6/14] Updating package.json..." -ForegroundColor Cyan
+Write-Host "[2/8] Checking git and GitHub..." -ForegroundColor Cyan
 
 Push-Location $ProjectRoot
 
 try {
 
-    npm version $Version --no-git-tag-version
+    $OldPreference = $ErrorActionPreference
 
-    if ($LASTEXITCODE -ne 0) {
+    try {
 
-        throw "npm version command failed."
+        $ErrorActionPreference = "Continue"
+
+        git rev-parse --is-inside-work-tree *> $null
+
+        $InRepo = ($LASTEXITCODE -eq 0)
+
+    }
+    finally {
+
+        $ErrorActionPreference = $OldPreference
+    }
+
+    if (-not $InRepo) {
+
+        throw "This folder is not a git repository."
+    }
+
+    $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
+
+    if ($Branch -eq "HEAD") {
+
+        throw "HEAD is detached. Check out a branch before releasing."
+    }
+
+    if (-not $BumpOnly) {
+
+        $AuthOutput = gh auth status 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+
+            Write-Host ""
+            Write-Host "GitHub authentication failed. Run:" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "gh auth login"
+            Write-Host ""
+
+            exit 1
+        }
+    }
+
+    if (-not $BumpOnly) {
+
+        # The bundler cannot produce updater artifacts without the signing
+        # key, so a missing secret means a guaranteed failure ten minutes
+        # into the run. Catch it here instead.
+        $Secrets = gh secret list --repo $Repo --json name 2>$null
+
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($Secrets)) {
+
+            $Names = ($Secrets | ConvertFrom-Json).name
+
+        }
+        else {
+
+            $Names = @()
+        }
+
+        $Missing = @(
+            "TAURI_SIGNING_PRIVATE_KEY",
+            "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+        ) | Where-Object { $Names -notcontains $_ }
+
+        if ($Missing.Count -gt 0) {
+
+            Write-Host ""
+            Write-Host "ERROR: the release workflow needs these repository secrets:" -ForegroundColor Red
+            Write-Host ""
+
+            foreach ($Name in $Missing) {
+
+                Write-Host "  $Name" -ForegroundColor Yellow
+            }
+
+            Write-Host ""
+            Write-Host "Set them once with:" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "gh secret set TAURI_SIGNING_PRIVATE_KEY --repo $Repo < `"`$env:USERPROFILE\.tauri\amethyst.key`""
+            Write-Host "gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo $Repo"
+            Write-Host ""
+
+            exit 1
+        }
+    }
+
+    # An existing tag would make the workflow rebuild an old commit, so
+    # it has to be dealt with before anything is written.
+    $TagExists = $false
+
+    $OldPreference = $ErrorActionPreference
+
+    try {
+
+        $ErrorActionPreference = "Continue"
+
+        git rev-parse --verify "refs/tags/$Tag" *> $null
+
+        $TagExists = ($LASTEXITCODE -eq 0)
+
+    }
+    finally {
+
+        $ErrorActionPreference = $OldPreference
+    }
+
+    if ($TagExists -and -not $ForceTag) {
+
+        Write-Host ""
+        Write-Host "ERROR: Tag $Tag already exists." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Release a new version instead, or re-run with -ForceTag to move it." -ForegroundColor Yellow
+        Write-Host ""
+
+        exit 1
+    }
+
+    # Only the version files are committed. Anything else that is dirty
+    # would be left out of the release, which is almost never intended.
+    $Dirty = @(
+        git status --porcelain |
+            ForEach-Object { $_.Substring(3).Trim('"') } |
+            Where-Object { $VersionFiles -notcontains $_ }
+    )
+
+    if ($Dirty.Count -gt 0 -and -not $AllowDirty) {
+
+        Write-Host ""
+        Write-Host "ERROR: Uncommitted changes that would not be in the release:" -ForegroundColor Red
+        Write-Host ""
+
+        foreach ($File in $Dirty) {
+
+            Write-Host "  $File" -ForegroundColor Yellow
+        }
+
+        Write-Host ""
+        Write-Host "Commit or stash them first, or re-run with -AllowDirty." -ForegroundColor Yellow
+        Write-Host ""
+
+        exit 1
     }
 
 }
@@ -465,94 +320,81 @@ finally {
     Pop-Location
 }
 
-Write-Host "package.json updated." -ForegroundColor Green
+Write-Host "Git OK (branch: $Branch)." -ForegroundColor Green
 
 
 # ============================================================
-# 8. UPDATE TAURI CONFIG
+# 5. BUMP THE VERSION
+#
+# All five files have to agree: the release workflow refuses to build
+# when they don't, because SignPath requires the version metadata in the
+# signed binary to match the release.
 # ============================================================
 
 Write-Host ""
-Write-Host "[7/14] Updating tauri.conf.json..." -ForegroundColor Cyan
+Write-Host "[3/8] Updating package.json and package-lock.json..." -ForegroundColor Cyan
 
-$TauriContent = Get-Content `
-    $TauriConfig `
-    -Raw
+Push-Location $ProjectRoot
+
+try {
+
+    npm version $Version --no-git-tag-version --allow-same-version | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+
+        throw "npm version failed."
+    }
+
+}
+finally {
+
+    Pop-Location
+}
+
+Write-Host "package.json and package-lock.json updated." -ForegroundColor Green
 
 
-# ------------------------------------------------------------
-# Update version WITHOUT re-serializing JSON.
-# This avoids BOM/formatting problems.
-# ------------------------------------------------------------
+Write-Host ""
+Write-Host "[4/8] Updating tauri.conf.json..." -ForegroundColor Cyan
 
 $VersionPattern = '"version"\s*:\s*"[^"]+"'
 
-if ($TauriContent -match $VersionPattern) {
+if ($TauriContent -notmatch $VersionPattern) {
 
-    $TauriContent = [regex]::Replace(
-        $TauriContent,
-        $VersionPattern,
-        '"version": "' + $Version + '"',
-        1
-    )
-
-}
-else {
-
-    throw "Could not find version field in tauri.conf.json."
+    throw "Could not find the version field in tauri.conf.json."
 }
 
+$TauriContent = [regex]::Replace(
+    $TauriContent,
+    $VersionPattern,
+    '"version": "' + $Version + '"',
+    1
+)
 
-# ------------------------------------------------------------
-# Ensure createUpdaterArtifacts is enabled.
-# ------------------------------------------------------------
-
+# The updater needs these artifacts; without them the workflow has
+# nothing to generate latest.json from.
 if ($TauriContent -notmatch '"createUpdaterArtifacts"\s*:') {
 
     $TargetsPattern = '("targets"\s*:\s*"[^"]+"\s*,?)'
 
-    if ($TauriContent -match $TargetsPattern) {
-
-        $TauriContent = [regex]::Replace(
-            $TauriContent,
-            $TargetsPattern,
-            '$1' +
-            [Environment]::NewLine +
-            '    "createUpdaterArtifacts": true,',
-            1
-        )
-
-    }
-    else {
+    if ($TauriContent -notmatch $TargetsPattern) {
 
         throw "Could not find bundle.targets in tauri.conf.json."
     }
+
+    $TauriContent = [regex]::Replace(
+        $TauriContent,
+        $TargetsPattern,
+        '$1' + [Environment]::NewLine + '    "createUpdaterArtifacts": true,',
+        1
+    )
 }
 
-
-# ------------------------------------------------------------
-# Write UTF-8 without BOM.
-# ------------------------------------------------------------
-
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
-[System.IO.File]::WriteAllText(
-    $TauriConfig,
-    $TauriContent,
-    $Utf8NoBom
-)
-
-
-# ------------------------------------------------------------
-# Validate again.
-# ------------------------------------------------------------
+[System.IO.File]::WriteAllText($TauriConfig, $TauriContent, $Utf8NoBom)
 
 try {
 
-    $null = Get-Content `
-        $TauriConfig `
-        -Raw |
-        ConvertFrom-Json
+    $null = Get-Content $TauriConfig -Raw | ConvertFrom-Json
 
 }
 catch {
@@ -563,166 +405,103 @@ catch {
 Write-Host "tauri.conf.json updated." -ForegroundColor Green
 
 
-# ============================================================
-# 9. UPDATE Cargo.toml
-# ============================================================
-
 Write-Host ""
-Write-Host "[8/14] Updating Cargo.toml..." -ForegroundColor Cyan
+Write-Host "[5/8] Updating Cargo.toml and Cargo.lock..." -ForegroundColor Cyan
 
-$CargoContent = Get-Content `
-    $CargoToml `
-    -Raw
-
+$CargoContent = Get-Content $CargoToml -Raw
 
 $CargoVersionPattern = '(?m)^version\s*=\s*"[^"]+"'
 
-if ($CargoContent -match $CargoVersionPattern) {
+if ($CargoContent -notmatch $CargoVersionPattern) {
 
-    $CargoContent = [regex]::Replace(
-        $CargoContent,
-        $CargoVersionPattern,
-        'version = "' + $Version + '"',
-        1
-    )
-
-}
-else {
-
-    throw "Could not find package version in Cargo.toml."
+    throw "Could not find the package version in Cargo.toml."
 }
 
-
-[System.IO.File]::WriteAllText(
-    $CargoToml,
+$CargoContent = [regex]::Replace(
     $CargoContent,
-    $Utf8NoBom
+    $CargoVersionPattern,
+    'version = "' + $Version + '"',
+    1
 )
 
-Write-Host "Cargo.toml updated." -ForegroundColor Green
+[System.IO.File]::WriteAllText($CargoToml, $CargoContent, $Utf8NoBom)
 
+# Cargo.lock records the version of this crate too. Leaving it behind
+# makes `cargo check --locked` in CI fail on the very next push.
+$LockContent = Get-Content $CargoLock -Raw
 
-# ============================================================
-# 10. LOAD SIGNING KEY
-# ============================================================
+$LockPattern = '(?m)(^name = "amethyst-launcher"\r?\nversion = ")[^"]+(")'
 
-Write-Host ""
-Write-Host "[9/14] Loading Tauri signing key..." -ForegroundColor Cyan
+if ($LockContent -notmatch $LockPattern) {
 
-$PrivateKey = Get-Content `
-    $KeyPath `
-    -Raw
-
-if ([string]::IsNullOrWhiteSpace($PrivateKey)) {
-
-    throw "Tauri signing key is empty."
+    throw "Could not find the amethyst-launcher entry in Cargo.lock."
 }
 
-$env:TAURI_SIGNING_PRIVATE_KEY = $PrivateKey
-
-Write-Host "Signing key loaded." -ForegroundColor Green
-
-# The CurseForge API key is baked in at compile time and never committed.
-# Use $env:CURSEFORGE_API_KEY if set, otherwise ~/.tauri/curseforge.key.
-# Without either, the build falls back to the public CurseForge mirror.
-$CurseForgeKeyPath = Join-Path `
-    $env:USERPROFILE `
-    ".tauri\curseforge.key"
-
-if ([string]::IsNullOrWhiteSpace($env:CURSEFORGE_API_KEY) -and (Test-Path $CurseForgeKeyPath)) {
-
-    $env:CURSEFORGE_API_KEY = (Get-Content $CurseForgeKeyPath -Raw).Trim()
-}
-
-if ([string]::IsNullOrWhiteSpace($env:CURSEFORGE_API_KEY)) {
-
-    Write-Host "No CurseForge API key found - Browse will use the public mirror." -ForegroundColor Yellow
-}
-else {
-
-    Write-Host "CurseForge API key loaded." -ForegroundColor Green
-}
-
-
-# ============================================================
-# SIGNING PASSWORD
-# ============================================================
-
-Write-Host ""
-Write-Host "==================================================" -ForegroundColor Yellow
-Write-Host "             TAURI SIGNING PASSWORD" -ForegroundColor Yellow
-Write-Host "==================================================" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "Enter the password used when generating:" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "$KeyPath" -ForegroundColor DarkGray
-Write-Host ""
-
-$SecurePassword = Read-Host `
-    "Signing password" `
-    -AsSecureString
-
-$BSTR = [Runtime.InteropServices.Marshal]::SecureStringToBSTR(
-    $SecurePassword
+$LockContent = [regex]::Replace(
+    $LockContent,
+    $LockPattern,
+    '${1}' + $Version + '${2}',
+    1
 )
 
-try {
+[System.IO.File]::WriteAllText($CargoLock, $LockContent, $Utf8NoBom)
 
-    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD =
-        [Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
-
-}
-finally {
-
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-}
+Write-Host "Cargo.toml and Cargo.lock updated." -ForegroundColor Green
 
 
-# ------------------------------------------------------------
-# From here on the signing key and its password live in this
-# process's environment, so drop them on any failure too.
-# ------------------------------------------------------------
+if ($BumpOnly) {
 
-trap {
+    Write-Host ""
+    Write-Host "-BumpOnly: version files written, nothing committed or pushed." -ForegroundColor Yellow
+    Write-Host ""
 
-    Remove-Item `
-        Env:TAURI_SIGNING_PRIVATE_KEY `
-        -ErrorAction SilentlyContinue
-
-    Remove-Item `
-        Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD `
-        -ErrorAction SilentlyContinue
-
-    break
+    exit 0
 }
 
 
 # ============================================================
-# BUILD
-#
-# Split into build -> bundle so the binary is in place and has
-# been checked before the installers are packed around it.
+# 6. COMMIT AND PUSH
 # ============================================================
 
 Write-Host ""
-Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "             BUILDING LAUNCHER" -ForegroundColor Cyan
-Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host ""
-
-Write-Host "[10/14] Building the launcher binary..." -ForegroundColor Cyan
-Write-Host ""
+Write-Host "[6/8] Committing and pushing the version bump..." -ForegroundColor Cyan
 
 Push-Location $ProjectRoot
 
 try {
 
-    npm run tauri -- build --no-bundle
+    git add -- $VersionFiles
 
     if ($LASTEXITCODE -ne 0) {
 
-        throw "Tauri build failed."
+        throw "git add failed."
     }
+
+    $Staged = git diff --cached --name-only
+
+    if ([string]::IsNullOrWhiteSpace($Staged)) {
+
+        Write-Host "Version files already at $Version - nothing to commit." -ForegroundColor Yellow
+
+    }
+    else {
+
+        git commit -m "chore(release): v$Version"
+
+        if ($LASTEXITCODE -ne 0) {
+
+            throw "git commit failed."
+        }
+    }
+
+    git push origin "HEAD:refs/heads/$Branch"
+
+    if ($LASTEXITCODE -ne 0) {
+
+        throw "git push failed. Pull the remote first:`ngit pull --rebase origin $Branch"
+    }
+
+    Write-Host "Pushed to $Branch." -ForegroundColor Green
 
 }
 finally {
@@ -732,72 +511,44 @@ finally {
 
 
 # ============================================================
-# CHECK BINARY
+# 7. TAG - THIS IS WHAT STARTS THE RELEASE
 # ============================================================
 
 Write-Host ""
-
-
-# The executable is named after the crate, not after productName.
-
-$BinNamePattern = '(?m)^\s*name\s*=\s*"([^"]+)"'
-
-$BinNameMatch = [regex]::Match(
-    $CargoContent,
-    $BinNamePattern
-)
-
-if (-not $BinNameMatch.Success) {
-
-    throw "Could not find the package name in Cargo.toml."
-}
-
-$ExePath = Join-Path `
-    $ReleaseDir `
-    ($BinNameMatch.Groups[1].Value + ".exe")
-
-if (-not (Test-Path $ExePath)) {
-
-    throw "Built executable was not found:`n$ExePath"
-}
-
-$ExeSize = (Get-Item $ExePath).Length
-
-Write-Host ("Executable: {0} MB" -f [math]::Round($ExeSize / 1MB, 2)) -ForegroundColor Green
-
-
-# ============================================================
-# BUNDLE + SIGN
-# ============================================================
-
-Write-Host ""
-Write-Host "[11/14] Bundling and signing the installers..." -ForegroundColor Cyan
-Write-Host ""
-
-
-# Clear this version's artifacts first. Otherwise a bundling step that
-# produced nothing would leave the previous run's MSI and .sig in place,
-# and the upload below would ship them as if they were fresh.
-
-foreach ($Stale in @($MsiPath, $SigPath)) {
-
-    if (Test-Path $Stale) {
-
-        Remove-Item `
-            $Stale `
-            -Force
-    }
-}
+Write-Host "[7/8] Tagging $Tag..." -ForegroundColor Cyan
 
 Push-Location $ProjectRoot
 
 try {
 
-    npm run tauri -- bundle
+    if ($ForceTag) {
+
+        git tag -f -a $Tag -m "Amethyst Launcher $Version"
+
+    }
+    else {
+
+        git tag -a $Tag -m "Amethyst Launcher $Version"
+    }
 
     if ($LASTEXITCODE -ne 0) {
 
-        throw "Tauri bundle failed."
+        throw "git tag failed."
+    }
+
+    if ($ForceTag) {
+
+        git push --force origin "refs/tags/$Tag"
+
+    }
+    else {
+
+        git push origin "refs/tags/$Tag"
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+
+        throw "Failed to push the tag. The release workflow was not started."
     }
 
 }
@@ -806,624 +557,110 @@ finally {
     Pop-Location
 }
 
-
-# ============================================================
-# CHECK MSI
-# ============================================================
-
-Write-Host ""
-Write-Host "[12/14] Checking MSI + signature..." -ForegroundColor Cyan
-
-if (-not (Test-Path $MsiPath)) {
-
-    throw "MSI was not found:`n$MsiPath"
-}
-
-if (-not (Test-Path $SigPath)) {
-
-    throw "MSI signature was not found:`n$SigPath"
-}
-
-
-$Signature = (
-    Get-Content `
-        $SigPath `
-        -Raw
-).Trim()
-
-
-if ([string]::IsNullOrWhiteSpace($Signature)) {
-
-    throw "MSI signature is empty."
-}
-
-
-Write-Host ""
-Write-Host "MSI:" -ForegroundColor Green
-Write-Host $MsiPath
-
-Write-Host ""
-Write-Host "MSI signature:" -ForegroundColor Green
-Write-Host $SigPath
+Write-Host "Tag pushed - the release workflow is starting." -ForegroundColor Green
 
 
 # ============================================================
-# GENERATE latest.json
-# ============================================================
-
-Write-Host ""
-Write-Host "Generating latest.json..." -ForegroundColor Cyan
-
-
-$PubDate = (
-    Get-Date
-).ToUniversalTime().ToString(
-    "yyyy-MM-ddTHH:mm:ssZ"
-)
-
-
-$MsiFileName = Split-Path `
-    $MsiPath `
-    -Leaf
-
-
-# GitHub renames uploaded assets, turning spaces into dots
-# ("Amethyst Launcher_..." is served as "Amethyst.Launcher_..."), so the URL
-# must use that name or the updater's download 404s.
-$AssetFileName = $MsiFileName -replace ' ', '.'
-
-$EncodedFileName = [System.Uri]::EscapeDataString(
-    $AssetFileName
-)
-
-
-$DownloadUrl =
-    "https://github.com/3aiya/amethyst-launcher/releases/download/$Tag/$EncodedFileName"
-
-
-$Latest = [ordered]@{
-
-    version = $Version
-
-    notes = "Amethyst Launcher $Version"
-
-    pub_date = $PubDate
-
-    platforms = [ordered]@{
-
-        "windows-x86_64" = [ordered]@{
-
-            signature = $Signature
-
-            url = $DownloadUrl
-        }
-    }
-}
-
-
-# Write WITHOUT a BOM. PowerShell 5.1's `Set-Content -Encoding UTF8`
-# prepends EF BB BF, which serde_json (Tauri updater) rejects with
-# "error decoding response body".
-$LatestJsonText = $Latest | ConvertTo-Json -Depth 10
-
-[System.IO.File]::WriteAllText(
-    $LatestJson,
-    $LatestJsonText,
-    (New-Object System.Text.UTF8Encoding $false)
-)
-
-
-# Validate latest.json
-
-$FirstBytes = [System.IO.File]::ReadAllBytes($LatestJson)[0..2]
-if ($FirstBytes[0] -eq 0xEF -and $FirstBytes[1] -eq 0xBB -and $FirstBytes[2] -eq 0xBF) {
-    throw "Generated latest.json has a UTF-8 BOM; the Tauri updater cannot parse it."
-}
-
-try {
-
-    $null = Get-Content `
-        $LatestJson `
-        -Raw |
-        ConvertFrom-Json
-
-}
-catch {
-
-    throw "Generated latest.json is invalid JSON."
-}
-
-
-Write-Host ""
-Write-Host "latest.json generated successfully." -ForegroundColor Green
-
-
-# ============================================================
-# COMMIT + PUSH THE VERSION FILES AND THE TAG
+# 8. WATCH THE WORKFLOW
 #
-# Runs BEFORE the release is created on purpose. `gh release
-# create` creates the tag itself when it is missing, pointing at
-# whatever the default branch's HEAD is at that moment, and then
-# pushing our own tag would be rejected as a non-fast-forward.
-#
-# Only the files this script rewrote are staged. The launcher's
-# source is never pushed.
+# The run is identified by the tag: for a tag push GitHub reports the
+# tag name as the run's head branch.
 # ============================================================
 
 Write-Host ""
-Write-Host "[13/14] Committing and pushing version files..." -ForegroundColor Cyan
+Write-Host "[8/8] Waiting for the release workflow..." -ForegroundColor Cyan
 
-$VersionFiles = @(
-    "package.json",
-    "package-lock.json",
-    "src-tauri/tauri.conf.json",
-    "src-tauri/Cargo.toml",
-    "latest.json"
-)
+if ($NoWatch) {
 
-if ($SkipGit) {
+    Write-Host "-NoWatch: not waiting." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Follow it here:" -ForegroundColor Cyan
+    Write-Host "https://github.com/$Repo/actions/workflows/$Workflow"
+    Write-Host ""
 
-    Write-Host "Skipped (-SkipGit)." -ForegroundColor Yellow
-
-}
-else {
-
-    Push-Location $ProjectRoot
-
-    try {
-
-        $Staged = @(
-            $VersionFiles |
-                Where-Object {
-                    Test-Path (Join-Path $ProjectRoot $_)
-                }
-        )
-
-        git add -- $Staged
-
-        if ($LASTEXITCODE -ne 0) {
-
-            throw "git add failed."
-        }
-
-
-        $OldErrorActionPreference = $ErrorActionPreference
-
-        try {
-
-            $ErrorActionPreference = "Continue"
-
-            git diff --cached --quiet
-
-            $HasChanges = (
-                $LASTEXITCODE -ne 0
-            )
-
-        }
-        finally {
-
-            $ErrorActionPreference = $OldErrorActionPreference
-        }
-
-
-        if ($HasChanges) {
-
-            git commit -m "chore(release): v$Version"
-
-            if ($LASTEXITCODE -ne 0) {
-
-                throw "git commit failed."
-            }
-
-            Write-Host "Committed: chore(release): v$Version" -ForegroundColor Green
-
-        }
-        else {
-
-            Write-Host "Version files are unchanged - nothing to commit." -ForegroundColor Yellow
-        }
-
-
-        # ------------------------------------------------------------
-        # Push the branch.
-        # ------------------------------------------------------------
-
-        git push origin "HEAD:refs/heads/$Branch"
-
-        if ($LASTEXITCODE -ne 0) {
-
-            throw "git push failed. Pull the remote first:`ngit pull --rebase origin $Branch"
-        }
-
-        Write-Host "Pushed $Branch to origin." -ForegroundColor Green
-
-
-        # ------------------------------------------------------------
-        # Tag. An existing tag is left alone unless -ForceTag is
-        # given, so a re-run cannot silently move a shipped tag.
-        # ------------------------------------------------------------
-
-        $OldErrorActionPreference = $ErrorActionPreference
-
-        try {
-
-            $ErrorActionPreference = "Continue"
-
-            git rev-parse -q --verify "refs/tags/$Tag" *> $null
-
-            $LocalTagExists = (
-                $LASTEXITCODE -eq 0
-            )
-
-        }
-        finally {
-
-            $ErrorActionPreference = $OldErrorActionPreference
-        }
-
-        $RemoteTag = git ls-remote --tags origin "refs/tags/$Tag"
-
-        if ($LASTEXITCODE -ne 0) {
-
-            throw "Could not read the remote's tags."
-        }
-
-        $RemoteTagExists = -not [string]::IsNullOrWhiteSpace($RemoteTag)
-
-
-        if (($LocalTagExists -or $RemoteTagExists) -and -not $ForceTag) {
-
-            Write-Host "Tag $Tag already exists - left unchanged. Use -ForceTag to move it." -ForegroundColor Yellow
-
-        }
-        else {
-
-            if ($ForceTag) {
-
-                git tag -f -a $Tag -m "Amethyst Launcher $Version"
-
-            }
-            else {
-
-                git tag -a $Tag -m "Amethyst Launcher $Version"
-            }
-
-            if ($LASTEXITCODE -ne 0) {
-
-                throw "git tag failed."
-            }
-
-
-            if ($ForceTag) {
-
-                git push --force origin "refs/tags/$Tag"
-
-            }
-            else {
-
-                git push origin "refs/tags/$Tag"
-            }
-
-            if ($LASTEXITCODE -ne 0) {
-
-                throw "Failed to push tag $Tag."
-            }
-
-            Write-Host "Pushed tag $Tag." -ForegroundColor Green
-        }
-
-    }
-    finally {
-
-        Pop-Location
-    }
+    exit 0
 }
 
+$RunId = $null
 
-# ============================================================
-# GITHUB RELEASE
-# ============================================================
+foreach ($Attempt in 1..30) {
 
-Write-Host ""
-Write-Host "[14/14] Creating GitHub Release..." -ForegroundColor Cyan
-Write-Host ""
-
-
-# ------------------------------------------------------------
-# Check whether release exists.
-#
-# IMPORTANT:
-# gh returns exit code 1 when release does not exist.
-# We temporarily change ErrorActionPreference so PowerShell
-# does NOT stop the script.
-# ------------------------------------------------------------
-
-$OldErrorActionPreference = $ErrorActionPreference
-
-try {
-
-    $ErrorActionPreference = "Continue"
-
-    gh release view $Tag `
+    $Runs = gh run list `
         --repo $Repo `
-        *> $null
+        --workflow $Workflow `
+        --limit 10 `
+        --json databaseId,headBranch,createdAt 2>$null
 
-    $ReleaseExists = (
-        $LASTEXITCODE -eq 0
-    )
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($Runs)) {
 
-}
-finally {
+        $Match = $Runs |
+            ConvertFrom-Json |
+            Where-Object { $_.headBranch -eq $Tag } |
+            Sort-Object createdAt -Descending |
+            Select-Object -First 1
 
-    $ErrorActionPreference = $OldErrorActionPreference
-}
+        if ($Match) {
 
-
-# ============================================================
-# EXISTING RELEASE
-# ============================================================
-
-if ($ReleaseExists) {
-
-    Write-Host ""
-    Write-Host "Release $Tag already exists." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Uploading updated files..." -ForegroundColor Yellow
-    Write-Host ""
-
-
-    gh release upload `
-        $Tag `
-        $MsiPath `
-        $LatestJson `
-        --repo $Repo `
-        --clobber
-
-
-    if ($LASTEXITCODE -ne 0) {
-
-        throw "Failed to upload files to GitHub Release."
-    }
-
-
-}
-# ============================================================
-# NEW RELEASE
-# ============================================================
-
-else {
-
-    Write-Host ""
-    Write-Host "Release $Tag does not exist." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Creating new GitHub Release..." -ForegroundColor Green
-    Write-Host ""
-
-
-    gh release create `
-        $Tag `
-        $MsiPath `
-        $LatestJson `
-        --repo $Repo `
-        --title "Amethyst Launcher $Version" `
-        --notes "Amethyst Launcher $Version release."
-
-
-    if ($LASTEXITCODE -ne 0) {
-
-        throw "Failed to create GitHub Release."
-    }
-}
-
-
-# ============================================================
-# VERIFY THE UPDATER DOWNLOAD URL
-#
-# latest.json has to name the MSI exactly as GitHub serves it. GitHub
-# rewrites asset names on upload (spaces become dots, for one), and a
-# mismatch means every installed launcher fails its update with
-# "Download request failed with status: 404 Not Found". So read back the
-# name GitHub actually stored, fix latest.json if it differs, and check
-# the URL really downloads before calling the release done.
-# ============================================================
-
-Write-Host ""
-Write-Host "Verifying updater download URL..." -ForegroundColor Cyan
-
-$Assets = gh release view $Tag `
-    --repo $Repo `
-    --json assets `
-    -q '.assets[].name'
-
-if ($LASTEXITCODE -ne 0) {
-
-    throw "Could not read the release's assets back from GitHub."
-}
-
-$UploadedMsi = @($Assets) |
-    Where-Object { $_ -like "*_${Version}_x64_en-US.msi" } |
-    Select-Object -First 1
-
-if (-not $UploadedMsi) {
-
-    throw "The MSI is missing from GitHub Release $Tag."
-}
-
-if ($UploadedMsi -ne $AssetFileName) {
-
-    Write-Host "GitHub stored the MSI as '$UploadedMsi' - rewriting latest.json to match." -ForegroundColor Yellow
-
-    $DownloadUrl =
-        "https://github.com/$Repo/releases/download/$Tag/" +
-        [System.Uri]::EscapeDataString($UploadedMsi)
-
-    $Latest.platforms."windows-x86_64".url = $DownloadUrl
-
-    [System.IO.File]::WriteAllText(
-        $LatestJson,
-        ($Latest | ConvertTo-Json -Depth 10),
-        (New-Object System.Text.UTF8Encoding $false)
-    )
-
-    gh release upload `
-        $Tag `
-        $LatestJson `
-        --repo $Repo `
-        --clobber
-
-    if ($LASTEXITCODE -ne 0) {
-
-        throw "Failed to upload the corrected latest.json."
-    }
-
-
-    # The copy already committed above points at the wrong asset
-    # name, so follow it up with the correction.
-
-    if (-not $SkipGit) {
-
-        Push-Location $ProjectRoot
-
-        try {
-
-            git add -- "latest.json"
-
-            $OldErrorActionPreference = $ErrorActionPreference
-
-            try {
-
-                $ErrorActionPreference = "Continue"
-
-                git diff --cached --quiet
-
-                $LatestChanged = (
-                    $LASTEXITCODE -ne 0
-                )
-
-            }
-            finally {
-
-                $ErrorActionPreference = $OldErrorActionPreference
-            }
-
-            if ($LatestChanged) {
-
-                git commit -m "fix(release): correct updater url for v$Version"
-
-                if ($LASTEXITCODE -ne 0) {
-
-                    throw "git commit of the corrected latest.json failed."
-                }
-
-                git push origin "HEAD:refs/heads/$Branch"
-
-                if ($LASTEXITCODE -ne 0) {
-
-                    throw "Failed to push the corrected latest.json."
-                }
-
-                Write-Host "Pushed the corrected latest.json." -ForegroundColor Green
-            }
-
-        }
-        finally {
-
-            Pop-Location
+            $RunId = $Match.databaseId
+            break
         }
     }
+
+    Start-Sleep -Seconds 4
 }
 
-try {
+if (-not $RunId) {
 
-    $Response = Invoke-WebRequest `
-        -Uri $DownloadUrl `
-        -Method Head `
-        -UseBasicParsing `
-        -MaximumRedirection 10
+    Write-Host ""
+    Write-Host "The run did not appear within two minutes." -ForegroundColor Yellow
+    Write-Host "Check it by hand:" -ForegroundColor Yellow
+    Write-Host "https://github.com/$Repo/actions/workflows/$Workflow"
+    Write-Host ""
 
-    if ($Response.StatusCode -ne 200) {
-
-        throw "HTTP $($Response.StatusCode)"
-    }
-
-}
-catch {
-
-    throw "Updater download URL does not work ($DownloadUrl): $_"
+    exit 1
 }
 
-Write-Host "Updater download URL OK:" -ForegroundColor Green
-Write-Host $DownloadUrl
+Write-Host "Run #$RunId started: https://github.com/$Repo/actions/runs/$RunId" -ForegroundColor Green
+Write-Host ""
+Write-Host "Once SignPath is live, the build pauses until a maintainer" -ForegroundColor DarkGray
+Write-Host "approves the signing request at https://app.signpath.io." -ForegroundColor DarkGray
+Write-Host ""
 
+gh run watch $RunId --repo $Repo --exit-status
 
-# ============================================================
-# CLEANUP SIGNING SECRETS
-# ============================================================
-
-Remove-Item `
-    Env:TAURI_SIGNING_PRIVATE_KEY `
-    -ErrorAction SilentlyContinue
-
-Remove-Item `
-    Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD `
-    -ErrorAction SilentlyContinue
-
-
-# ============================================================
-# SUCCESS
-# ============================================================
+$Failed = ($LASTEXITCODE -ne 0)
 
 Write-Host ""
-Write-Host ""
+
+if ($Failed) {
+
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host "          RELEASE FAILED" -ForegroundColor Red
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Logs:" -ForegroundColor Yellow
+    Write-Host "https://github.com/$Repo/actions/runs/$RunId"
+    Write-Host ""
+    Write-Host "The tag is already pushed, so after fixing the problem" -ForegroundColor Yellow
+    Write-Host "re-run the same build from the Actions tab, or:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "gh workflow run $Workflow --repo $Repo -f tag=$Tag"
+    Write-Host ""
+
+    exit 1
+}
+
 Write-Host "==================================================" -ForegroundColor Green
-Write-Host "          RELEASE COMPLETED SUCCESSFULLY" -ForegroundColor Green
+Write-Host "          RELEASE PUBLISHED" -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host ""
-
-Write-Host "Version:" -ForegroundColor Cyan
-Write-Host $Version
-
+Write-Host "Release :" -ForegroundColor Cyan
+Write-Host "https://github.com/$Repo/releases/tag/$Tag"
 Write-Host ""
-Write-Host "GitHub Tag:" -ForegroundColor Cyan
-Write-Host $Tag
-
+Write-Host "Updater :" -ForegroundColor Cyan
+Write-Host "https://github.com/$Repo/releases/latest/download/latest.json"
 Write-Host ""
-Write-Host "MSI:" -ForegroundColor Cyan
-Write-Host $MsiFileName
-
-Write-Host ""
-Write-Host "Executable:" -ForegroundColor Cyan
-
-Write-Host ("{0} MB" -f [math]::Round($ExeSize / 1MB, 2))
-
-Write-Host ""
-Write-Host "Git:" -ForegroundColor Cyan
-
-if ($SkipGit) {
-
-    Write-Host "skipped (-SkipGit)"
-
-}
-else {
-
-    Write-Host "pushed $($VersionFiles -join ', ') to $Branch"
-    Write-Host "tag $Tag"
-}
-
-Write-Host ""
-Write-Host "GitHub Release:" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "https://github.com/3aiya/amethyst-launcher/releases/tag/$Tag"
-
-Write-Host ""
-Write-Host "Updater endpoint:" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "https://github.com/3aiya/amethyst-launcher/releases/latest/download/latest.json"
-
-Write-Host ""
-Write-Host "Uploaded files:" -ForegroundColor Green
-Write-Host "  - $MsiFileName"
+Write-Host "Uploaded:" -ForegroundColor Cyan
+Write-Host "  - Amethyst Launcher_${Version}_x64_en-US.msi"
 Write-Host "  - latest.json"
-
 Write-Host ""
-Write-Host "Source code was NOT uploaded." -ForegroundColor Green

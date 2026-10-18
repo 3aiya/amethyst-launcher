@@ -87,6 +87,8 @@ export interface AmethystSettings {
   newsFeedUrl: string | null;
   theme: ThemeName;
   discordRpcEnabled: boolean;
+  /** Whether the anonymous usage ping is sent; see CODE_SIGNING.md. */
+  telemetryEnabled: boolean;
 }
 
 export interface VersionEntry {

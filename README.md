@@ -46,6 +46,20 @@ run it. After that, the launcher updates itself automatically.
 > Currently Windows (x64) only. The codebase is cross-platform and macOS / Linux
 > builds are welcome contributions.
 
+## 🔐 Code signing policy
+
+Every release is built from the tagged commit by the
+[release workflow](.github/workflows/release.yml) on GitHub's own runners, then
+code signed through SignPath - so the installer you download can be traced back
+to this repository, and Windows can tell you it has not been tampered with.
+
+> Free code signing provided by [SignPath.io](https://about.signpath.io),
+> certificate by [SignPath Foundation](https://signpath.org)
+
+Our full [**Code signing policy**](CODE_SIGNING.md) covers the team roles, how
+to verify a download, and exactly what the launcher sends over the network -
+including the anonymous usage ping you can switch off under Settings → Privacy.
+
 ## 🛠️ Building from source
 
 ### Prerequisites
@@ -86,7 +100,8 @@ src-tauri/
   src/commands.rs       Tauri command handlers
   src/db.rs             SQLite storage
   src/services/         launching, auth, installers, Modrinth, CurseForge, ...
-build-release.ps1       local release script (build, sign, publish)
+build-release.ps1       one-command release: bump, tag, then watch CI
+.github/workflows/      CI, and the release workflow that builds and signs
 ```
 
 ## 🤝 Contributing

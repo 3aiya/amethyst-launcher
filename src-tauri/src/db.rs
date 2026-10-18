@@ -43,6 +43,7 @@ fn default_settings(app_data_dir: &PathBuf) -> AmethystSettings {
         news_feed_url: None,
         theme: "dark".into(),
         discord_rpc_enabled: true,
+        telemetry_enabled: true,
     }
 }
 

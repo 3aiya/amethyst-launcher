@@ -39,12 +39,16 @@ pub async fn get_config() -> RemoteConfig {
 
 /// Fire-and-forget usage ping: a random per-install id, the launcher
 /// version, the OS and - for `game_launch` - the version played. Nothing that
-/// identifies the player.
+/// identifies the player. Skipped entirely when the user has turned the ping
+/// off under Settings -> Privacy.
 pub fn track(app: &AppHandle, event: &'static str, minecraft_version: Option<String>, loader: Option<String>) {
     let Some(url) = admin_api_url("telemetry") else { return };
     let install_id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
+        if !db::get_settings(&conn, &crate::app_data_dir(app)).telemetry_enabled {
+            return;
+        }
         db::get_or_create_install_id(&conn)
     };
     let body = serde_json::json!({

@@ -170,6 +170,10 @@ pub struct AmethystSettings {
     /// Whether to show "Playing ..." on the user's Discord profile.
     #[serde(default = "default_true")]
     pub discord_rpc_enabled: bool,
+    /// Whether the anonymous usage ping is sent (see `services::remote::track`).
+    /// The opt-out the code signing policy promises - see CODE_SIGNING.md.
+    #[serde(default = "default_true")]
+    pub telemetry_enabled: bool,
 }
 
 fn default_theme() -> String {

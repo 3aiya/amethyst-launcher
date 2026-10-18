@@ -464,6 +464,29 @@ export default function SettingsPage({
           </div>
         </Section>
 
+        <Section icon={<ShieldCheck size={17} />} title="Privacy">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-xs text-zinc-500">
+              Send an anonymous usage ping when the launcher opens and when a game starts - a random
+              install id, the launcher version, your OS and the version played. No account details, ever.
+              See our{" "}
+              <a
+                href="https://github.com/3aiya/amethyst-launcher/blob/main/CODE_SIGNING.md#privacy"
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                privacy and code signing policy
+              </a>
+              .
+            </p>
+            <Toggle
+              checked={settings.telemetryEnabled}
+              onChange={(telemetryEnabled) => onSave({ telemetryEnabled })}
+            />
+          </div>
+        </Section>
+
         <UpdatesSection />
 
         <Section icon={<Package size={17} />} title="Amethyst modpack">

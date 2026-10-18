@@ -1,27 +1,70 @@
 name: Release Amethyst Launcher
 
-# Disabled as an automatic trigger: build-release.ps1 builds,
-# signs and publishes the release locally and pushes the tag itself. Running on
-# "push: tags" as well would produce a second build on top of it.
-# Still runnable by hand from the Actions tab if the local build is unavailable.
+# The one and only way a published release is produced. Everything runs on
+# GitHub-hosted runners, from the tagged commit, so the installer users
+# download can be traced back to this repository - which is what SignPath
+# verifies before it signs anything. See CODE_SIGNING.md.
+#
+# Push a tag to release:
+#   git tag v1.2.0 && git push origin v1.2.0
+
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build, e.g. v1.1.1"
+        description: "Existing release tag to (re)build, e.g. v1.1.1"
         required: true
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
-    name: Build and Release
+    name: Build, sign and publish
     runs-on: windows-latest
+
+    env:
+      # Empty until the SignPath subscription is set up; every signing step
+      # below is skipped while it is, so the workflow still produces a
+      # (clearly unsigned) release.
+      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Resolve and verify the version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ env.TAG }}"
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Tag '$tag' is not of the form v1.2.3."
+          }
+          $version = $tag.Substring(1)
+
+          # SignPath requires the version metadata in the signed binary to
+          # match the release, so the three places it lives have to agree
+          # before anything is built.
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+
+          foreach ($pair in @(@("package.json", $pkg), @("tauri.conf.json", $conf), @("Cargo.toml", $cargo))) {
+            if ($pair[1] -ne $version) {
+              throw "$($pair[0]) says $($pair[1]) but the tag says $version. Bump it and re-tag."
+            }
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing $version from $tag."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,19 +78,180 @@ jobs:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Release Tauri App
-        uses: tauri-apps/tauri-action@v0
+      - name: Build the installer
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The bundler refuses to run with `createUpdaterArtifacts` on and no
+          # key. The .sig it writes here is thrown away: it is made over the
+          # unsigned MSI, so it is regenerated after signing, further down.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: npm run tauri -- build --bundles msi
+
+      - name: Stage the unsigned installer
+        id: stage
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $msi = Get-ChildItem "src-tauri/target/release/bundle/msi/*_${version}_x64_en-US.msi" |
+            Select-Object -First 1
+          if (-not $msi) { throw "No MSI was produced for $version." }
+
+          New-Item -ItemType Directory -Force unsigned | Out-Null
+          Copy-Item $msi.FullName "unsigned/" -Force
+          Write-Host "Staged $($msi.Name) ($([math]::Round($msi.Length / 1MB, 1)) MB)."
+
+      # SignPath signs a GitHub workflow artifact, never a file handed to it
+      # by the build script - that is how it knows where the binary came from.
+      - name: Upload the unsigned installer
+        id: upload
+        if: env.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ inputs.tag }}
-          releaseName: "Amethyst Launcher ${{ inputs.tag }}"
-          releaseBody: "New Amethyst Launcher release."
-          releaseDraft: false
-          prerelease: false
+          name: unsigned-installer
+          path: unsigned/*.msi
+          if-no-files-found: error
+
+      # The artifact arrives at SignPath as a ZIP, so the artifact
+      # configuration there must have a <zip-file> root containing the MSI.
+      - name: Sign the installer with SignPath
+        id: signpath
+        if: env.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: amethyst-launcher
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: msi-installer
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          output-artifact-directory: signed
+          wait-for-completion: true
+          # Every release is approved by hand in SignPath, so allow for the
+          # approver not being at their desk the second the build finishes.
+          wait-for-completion-timeout-in-seconds: 3600
+
+      - name: Fall back to the unsigned installer
+        if: env.SIGNPATH_ORGANIZATION_ID == ''
+        shell: pwsh
+        run: |
+          Write-Warning "SignPath is not configured - publishing an UNSIGNED installer."
+          New-Item -ItemType Directory -Force signed | Out-Null
+          Copy-Item "unsigned/*.msi" "signed/" -Force
+
+      - name: Sign the update manifest
+        id: updater
+        shell: pwsh
+        env:
+          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # Authenticode signing rewrote the MSI, so the updater's minisign
+          # signature has to be made over the signed file. Generating it any
+          # earlier breaks auto-update for every user.
+          $msi = Get-ChildItem "signed/*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "No installer to sign the manifest for." }
+
+          npm run tauri -- signer sign --private-key "$env:TAURI_KEY" --password "$env:TAURI_KEY_PASSWORD" "$($msi.FullName)"
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed." }
+
+          $sig = (Get-Content "$($msi.FullName).sig" -Raw).Trim()
+          "msi-path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "msi-name=$($msi.Name)" >> $env:GITHUB_OUTPUT
+          "signature=$sig" >> $env:GITHUB_OUTPUT
+
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $tag = "${{ env.TAG }}"
+
+          # GitHub serves uploaded assets with spaces turned into dots
+          # ("Amethyst Launcher_..." becomes "Amethyst.Launcher_..."), so the
+          # updater's URL has to use that name or the download 404s.
+          $assetName = "${{ steps.updater.outputs.msi-name }}" -replace ' ', '.'
+          $encoded = [System.Uri]::EscapeDataString($assetName)
+
+          $latest = [ordered]@{
+            version   = $version
+            notes     = "Amethyst Launcher $version"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = "${{ steps.updater.outputs.signature }}"
+                url       = "https://github.com/${{ github.repository }}/releases/download/$tag/$encoded"
+              }
+            }
+          }
+
+          # Without a BOM - serde_json, and so the Tauri updater, rejects one.
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "latest.json"),
+            ($latest | ConvertTo-Json -Depth 10),
+            (New-Object System.Text.UTF8Encoding $false)
+          )
+
+          $null = Get-Content latest.json -Raw | ConvertFrom-Json
+          Get-Content latest.json
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNED: ${{ steps.signpath.outcome == 'success' }}
+        run: |
+          $tag = "${{ env.TAG }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $repo = "${{ github.repository }}"
+          $run = "${{ github.run_id }}"
+
+          $signingNote = if ($env:SIGNED -eq "true") {
+            "This installer is digitally signed - Windows shows **SignPath Foundation** as the verified publisher."
+          } else {
+            "> **Note:** this installer is not code signed yet, so Windows will warn about an unknown publisher."
+          }
+
+          # Built as an array rather than a here-string: here-string content
+          # has to start at column 0, which would end this YAML block.
+          $notes = @(
+            "Amethyst Launcher $version",
+            "",
+            $signingNote,
+            "",
+            "Built from ``$tag`` by [this workflow](https://github.com/$repo/actions/runs/$run).",
+            "",
+            "**Code signing policy:** how these installers are built, signed and verified,",
+            "and what the launcher sends over the network, is documented in",
+            "[CODE_SIGNING.md](https://github.com/$repo/blob/main/CODE_SIGNING.md)."
+          ) -join "`n"
+
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "release-notes.md"),
+            $notes,
+            (New-Object System.Text.UTF8Encoding $false)
+          )
+
+          $msi = "${{ steps.updater.outputs.msi-path }}"
+
+          $null = gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Updating the existing release $tag."
+            gh release edit $tag --title "Amethyst Launcher $version" --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw "gh release edit failed." }
+            gh release upload $tag "$msi" latest.json --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed." }
+          } else {
+            gh release create $tag "$msi" latest.json --title "Amethyst Launcher $version" --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+          }
+
+          Write-Host "Published https://github.com/$repo/releases/tag/$tag"
