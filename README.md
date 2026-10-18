@@ -39,9 +39,10 @@ instances over from other launchers — all from one dark, minimal interface.
 
 ## 📥 Download
 
-Grab the latest installer from the
-[**Releases**](https://github.com/3aiya/amethyst-launcher/releases/latest) page and
-run it. After that, the launcher updates itself automatically.
+Grab the latest installer from
+[**launcher.amethystcommunity.net**](https://launcher.amethystcommunity.net/#download)
+or the [**Releases**](https://github.com/3aiya/amethyst-launcher/releases/latest)
+page and run it. After that, the launcher updates itself automatically.
 
 > Currently Windows (x64) only. The codebase is cross-platform and macOS / Linux
 > builds are welcome contributions.

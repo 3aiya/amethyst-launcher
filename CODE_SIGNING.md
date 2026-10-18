@@ -5,8 +5,12 @@ show who published them and confirm the file has not been altered since it was
 built.
 
 > **Status:** code signing through the SignPath Foundation is being set up.
-> Releases up to and including v1.1.1 are **not** signed; this policy applies to
-> every release published after that one.
+> Until it is live, installers are **not** signed. Every release's notes say
+> whether its installer is signed.
+
+This policy is also published on the project website at
+<https://launcher.amethystcommunity.net/#code-signing>, with the privacy policy
+at <https://launcher.amethystcommunity.net/privacy>.
 
 > Free code signing provided by [SignPath.io](https://about.signpath.io),
 > certificate by [SignPath Foundation](https://signpath.org)
