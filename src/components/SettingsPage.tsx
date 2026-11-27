@@ -127,7 +127,7 @@ interface SectionDef {
   description?: string;
   keywords: string;
   icon: ReactNode;
-  mode?: "instant" | "save";
+  mode?: "save";
   action?: ReactNode;
   render: () => ReactNode;
 }
@@ -141,6 +141,8 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
+  const [savedNote, setSavedNote] = useState<{ id: string; key: number } | null>(null);
+  const savedNoteTimer = useRef<number | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -177,7 +179,10 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
 
   useEffect(() => {
     window.amethyst.system.totalMemoryMb().then(setTotalMb).catch(() => {});
-    return () => window.clearTimeout(toastTimer.current);
+    return () => {
+      window.clearTimeout(toastTimer.current);
+      window.clearTimeout(savedNoteTimer.current);
+    };
   }, []);
 
   function flash(text: string) {
@@ -186,8 +191,14 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
     toastTimer.current = window.setTimeout(() => setToast(null), 2200);
   }
 
-  async function instant(partial: Partial<AmethystSettings>) {
+  /** Applies a change straight away and flashes "Saved" on its card. While
+   * the note is already up (dragging the accent picker, say) it just stays
+   * longer instead of replaying. */
+  async function instant(sectionId: string, partial: Partial<AmethystSettings>) {
     await onSave(partial);
+    setSavedNote((cur) => (cur?.id === sectionId ? cur : { id: sectionId, key: (cur?.key ?? 0) + 1 }));
+    window.clearTimeout(savedNoteTimer.current);
+    savedNoteTimer.current = window.setTimeout(() => setSavedNote(null), 1600);
   }
 
   async function saveDraft() {
@@ -258,9 +269,8 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
       description: "What the launcher does once Minecraft is up. It comes back by itself when the game closes.",
       keywords: "launch behavior behaviour minimize hide close keep open window tray",
       icon: <Rocket size={17} />,
-      mode: "instant",
       render: () => (
-        <LaunchBehaviorPicker value={settings.launchBehavior} onChange={(launchBehavior) => instant({ launchBehavior })} />
+        <LaunchBehaviorPicker value={settings.launchBehavior} onChange={(launchBehavior) => instant("launch", { launchBehavior })} />
       ),
     },
     {
@@ -269,7 +279,6 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
       title: "Versions & integrations",
       keywords: "discord rich presence rpc snapshots old versions beta alpha version list",
       icon: <SlidersHorizontal size={17} />,
-      mode: "instant",
       render: () => (
         <div>
           <Row
@@ -279,21 +288,21 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
             <Toggle
               label="Discord Rich Presence"
               checked={settings.discordRpcEnabled}
-              onChange={(discordRpcEnabled) => instant({ discordRpcEnabled })}
+              onChange={(discordRpcEnabled) => instant("integrations", { discordRpcEnabled })}
             />
           </Row>
           <Row label="Show snapshots" hint="Weekly test builds in the version list. They can break worlds - back up first.">
             <Toggle
               label="Show snapshots"
               checked={settings.showSnapshots}
-              onChange={(showSnapshots) => instant({ showSnapshots })}
+              onChange={(showSnapshots) => instant("integrations", { showSnapshots })}
             />
           </Row>
           <Row label="Show old versions" hint="Beta and Alpha releases from before 1.0.">
             <Toggle
               label="Show old versions"
               checked={settings.showOldVersions}
-              onChange={(showOldVersions) => instant({ showOldVersions })}
+              onChange={(showOldVersions) => instant("integrations", { showOldVersions })}
             />
           </Row>
         </div>
@@ -306,9 +315,8 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
       description: "The colours of the whole launcher.",
       keywords: "theme dark light blue green colour color mode",
       icon: <Palette size={17} />,
-      mode: "instant",
       render: () => (
-        <ThemePicker value={settings.theme} accentOverride={settings.accentColor} onChange={(theme) => instant({ theme })} />
+        <ThemePicker value={settings.theme} accentOverride={settings.accentColor} onChange={(theme) => instant("theme", { theme })} />
       ),
     },
     {
@@ -318,9 +326,8 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
       description: "Buttons, highlights and the active tab. Works with every theme.",
       keywords: "accent colour color highlight custom picker",
       icon: <Sparkles size={17} />,
-      mode: "instant",
       render: () => (
-        <AccentPicker value={settings.accentColor} themeAccent={themeAccent} onChange={(accentColor) => instant({ accentColor })} />
+        <AccentPicker value={settings.accentColor} themeAccent={themeAccent} onChange={(accentColor) => instant("accent", { accentColor })} />
       ),
     },
     {
@@ -329,18 +336,17 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
       title: "Interface",
       keywords: "scale zoom size ui interface reduce motion animation accessibility",
       icon: <ZoomIn size={17} />,
-      mode: "instant",
       render: () => (
         <div>
           <Row label="Interface size" hint="Zooms the whole launcher - handy on very small or very large screens.">
             <Segmented
               value={settings.uiScale}
-              onChange={(uiScale) => instant({ uiScale })}
+              onChange={(uiScale) => instant("interface", { uiScale })}
               options={UI_SCALES.map((s) => ({ value: s, label: `${s}%` }))}
             />
           </Row>
           <Row label="Reduce motion" hint="Turns off page fades, hovers and other animations.">
-            <Toggle label="Reduce motion" checked={settings.reduceMotion} onChange={(reduceMotion) => instant({ reduceMotion })} />
+            <Toggle label="Reduce motion" checked={settings.reduceMotion} onChange={(reduceMotion) => instant("interface", { reduceMotion })} />
           </Row>
         </div>
       ),
@@ -626,6 +632,7 @@ export default function SettingsPage({ settings, accounts, onSave, onManageAccou
                   title={s.title}
                   description={s.description}
                   mode={s.mode}
+                  savedKey={savedNote?.id === s.id ? savedNote.key : undefined}
                   action={s.action}
                 >
                   {s.render()}

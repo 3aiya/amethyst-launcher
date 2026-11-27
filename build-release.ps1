@@ -199,9 +199,24 @@ try {
 
     if (-not $BumpOnly) {
 
-        $AuthOutput = gh auth status 2>&1
+        # gh prints its status on stderr. Under "Stop", Windows PowerShell
+        # turns every captured stderr line into a terminating error, so
+        # relax it for this call and judge by the exit code instead.
+        $OldPreference = $ErrorActionPreference
 
-        if ($LASTEXITCODE -ne 0) {
+        try {
+
+            $ErrorActionPreference = "Continue"
+
+            gh auth status *> $null
+            $AuthExit = $LASTEXITCODE
+        }
+        finally {
+
+            $ErrorActionPreference = $OldPreference
+        }
+
+        if ($AuthExit -ne 0) {
 
             Write-Host ""
             Write-Host "GitHub authentication failed. Run:" -ForegroundColor Red
@@ -218,9 +233,21 @@ try {
         # The bundler cannot produce updater artifacts without the signing
         # key, so a missing secret means a guaranteed failure ten minutes
         # into the run. Catch it here instead.
-        $Secrets = gh secret list --repo $Repo --json name 2>$null
+        $OldPreference = $ErrorActionPreference
 
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($Secrets)) {
+        try {
+
+            $ErrorActionPreference = "Continue"
+
+            $Secrets = gh secret list --repo $Repo --json name 2>$null
+            $SecretsExit = $LASTEXITCODE
+        }
+        finally {
+
+            $ErrorActionPreference = $OldPreference
+        }
+
+        if ($SecretsExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($Secrets)) {
 
             $Names = ($Secrets | ConvertFrom-Json).name
 
@@ -585,13 +612,25 @@ $RunId = $null
 
 foreach ($Attempt in 1..30) {
 
-    $Runs = gh run list `
-        --repo $Repo `
-        --workflow $Workflow `
-        --limit 10 `
-        --json databaseId,headBranch,createdAt 2>$null
+    $OldPreference = $ErrorActionPreference
 
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($Runs)) {
+    try {
+
+        $ErrorActionPreference = "Continue"
+
+        $Runs = gh run list `
+            --repo $Repo `
+            --workflow $Workflow `
+            --limit 10 `
+            --json databaseId,headBranch,createdAt 2>$null
+        $RunsExit = $LASTEXITCODE
+    }
+    finally {
+
+        $ErrorActionPreference = $OldPreference
+    }
+
+    if ($RunsExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($Runs)) {
 
         $Match = $Runs |
             ConvertFrom-Json |

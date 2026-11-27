@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Zap, Save } from "lucide-react";
+import { Check, Save } from "lucide-react";
 
 export const INPUT =
   "w-full rounded-lg border border-border-light bg-bg-elevated px-3 py-2 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-accent";
@@ -10,14 +10,17 @@ export const GHOST_BTN =
 export const PRIMARY_BTN =
   "flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-50";
 
-/** One card in the settings well. `mode` tells the person whether a change
- * applies on its own or waits for Save. */
+/** One card in the settings well. Changes apply on their own by default;
+ * `mode="save"` marks the cards that wait for Save instead. `savedKey`
+ * flashes a short "Saved" note after an instant change lands - a new key
+ * replays it. */
 export function Section({
   id,
   icon,
   title,
   description,
   mode,
+  savedKey,
   action,
   children,
   index = 0,
@@ -26,7 +29,8 @@ export function Section({
   icon: ReactNode;
   title: string;
   description?: string;
-  mode?: "instant" | "save";
+  mode?: "save";
+  savedKey?: number;
   action?: ReactNode;
   children: ReactNode;
   index?: number;
@@ -44,7 +48,16 @@ export function Section({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
-            {mode && <ModeBadge mode={mode} />}
+            {mode === "save" && <SaveBadge />}
+            {savedKey !== undefined && (
+              <span
+                key={savedKey}
+                role="status"
+                className="fade-up flex items-center gap-1 text-[11px] font-medium text-emerald-400"
+              >
+                <Check size={11} strokeWidth={3} /> Saved
+              </span>
+            )}
           </div>
           {description && <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">{description}</p>}
         </div>
@@ -55,15 +68,8 @@ export function Section({
   );
 }
 
-function ModeBadge({ mode }: { mode: "instant" | "save" }) {
-  return mode === "instant" ? (
-    <span
-      title="Changes here apply straight away"
-      className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400"
-    >
-      <Zap size={9} /> Instant
-    </span>
-  ) : (
+function SaveBadge() {
+  return (
     <span
       title="Changes here wait for Save (Ctrl+S)"
       className="flex items-center gap-1 rounded-full bg-bg-card-hover px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400"
