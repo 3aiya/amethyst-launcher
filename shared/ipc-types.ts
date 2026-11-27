@@ -87,8 +87,39 @@ export interface AmethystSettings {
   newsFeedUrl: string | null;
   theme: ThemeName;
   discordRpcEnabled: boolean;
-  /** Whether the anonymous usage ping is sent; see CODE_SIGNING.md. */
-  telemetryEnabled: boolean;
+  /** Revision of the Terms / Privacy Policy accepted on first launch; null
+   * until then. The launcher stays locked until it matches `LEGAL_VERSION`. */
+  termsAcceptedVersion: number | null;
+  /** When it was accepted, ms since epoch. */
+  termsAcceptedAt: number | null;
+  /** Launch the game at windowWidth x windowHeight. */
+  customResolution: boolean;
+  /** Start the game fullscreen. */
+  fullscreen: boolean;
+  /** What the launcher window does once the game starts. */
+  launchBehavior: LaunchBehavior;
+  /** Turns off the launcher's own animations. */
+  reduceMotion: boolean;
+  /** Interface zoom in percent. */
+  uiScale: number;
+  /** `#rrggbb` overriding the theme's accent; null keeps the theme's. */
+  accentColor: string | null;
+}
+
+export type LaunchBehavior = "keep" | "minimize" | "hide";
+
+/** `java -version` of the executable Settings points at. */
+export interface JavaInfo {
+  path: string;
+  version: string;
+  details: string;
+}
+
+/** Game directory size, broken down by top-level folder. */
+export interface StorageUsage {
+  root: string;
+  total: number;
+  entries: { id: "profiles" | "assets" | "libraries" | "runtimes" | "versions" | "other"; bytes: number }[];
 }
 
 export interface VersionEntry {

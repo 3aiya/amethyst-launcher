@@ -40,6 +40,12 @@ fn current_os_name() -> &'static str {
 }
 
 fn rule_allows(rules: &Value) -> bool {
+    rule_allows_with(rules, &[])
+}
+
+/// Like `rule_allows`, but a rule's `features` (custom resolution, quick
+/// play...) count as met when every one set to `true` is in `features`.
+fn rule_allows_with(rules: &Value, features: &[&str]) -> bool {
     let Some(rules) = rules.as_array() else { return true };
     if rules.is_empty() {
         return true;
@@ -64,9 +70,17 @@ fn rule_allows(rules: &Value) -> bool {
             None => true,
         };
         let features_ok = match rule.get("features") {
-            // We don't set any optional features (demo mode, custom resolution,
-            // quick-play) at rule-check time, so any rule requiring one is skipped.
-            Some(features) => features.as_object().map(|o| o.is_empty()).unwrap_or(true),
+            // Only the features the launch actually turned on match; anything
+            // else (demo mode, quick-play paths...) keeps its rule skipped.
+            Some(wanted) => wanted
+                .as_object()
+                .map(|o| {
+                    o.iter().all(|(name, value)| {
+                        let on = features.contains(&name.as_str());
+                        value.as_bool().unwrap_or(true) == on
+                    })
+                })
+                .unwrap_or(true),
             None => true,
         };
         if os_matches && features_ok {
@@ -360,6 +374,9 @@ pub struct LaunchOptions<'a> {
     pub extra_jvm_args: &'a [String],
     pub window_width: i64,
     pub window_height: i64,
+    /// Pass `window_width` x `window_height` to the game.
+    pub custom_resolution: bool,
+    pub fullscreen: bool,
     pub account: &'a Account,
     pub forge_installer_ran: bool,
     pub quick_play: Option<&'a QuickPlayTarget>,
@@ -373,11 +390,16 @@ fn substitute(template: &str, vars: &std::collections::HashMap<&str, String>) ->
     out
 }
 
-fn collect_arg_strings(value: &Value, vars: &std::collections::HashMap<&str, String>, out: &mut Vec<String>) {
+fn collect_arg_strings(
+    value: &Value,
+    vars: &std::collections::HashMap<&str, String>,
+    features: &[&str],
+    out: &mut Vec<String>,
+) {
     match value {
         Value::String(s) => out.push(substitute(s, vars)),
         Value::Object(obj) => {
-            let rules_ok = obj.get("rules").map(rule_allows).unwrap_or(true);
+            let rules_ok = obj.get("rules").map(|r| rule_allows_with(r, features)).unwrap_or(true);
             if !rules_ok {
                 return;
             }
@@ -448,17 +470,34 @@ fn build_arguments(
         }
     }
 
+    // Optional features the version json gates arguments behind.
+    let mut features: Vec<&str> = Vec::new();
+    let resolution = opts.custom_resolution && opts.window_width > 0 && opts.window_height > 0;
+    if resolution {
+        features.push("has_custom_resolution");
+    }
+    if let Some(qp) = opts.quick_play {
+        features.push(match qp.kind {
+            crate::types::QuickPlayType::Singleplayer => "is_quick_play_singleplayer",
+            crate::types::QuickPlayType::Multiplayer => "is_quick_play_multiplayer",
+        });
+    }
+
     let mut jvm_args = vec![
         format!("-Xms{}M", opts.ram_min_mb),
         format!("-Xmx{}M", opts.ram_max_mb),
         format!("-Djava.library.path={}", natives_dir.to_string_lossy()),
     ];
     let mut game_args = Vec::new();
+    // Whether the json itself carries the resolution / quick play arguments;
+    // older versions need them added by hand below.
+    let mut json_has_resolution = false;
+    let mut json_has_quick_play = false;
 
     if let Some(args) = opts.version_json.get("arguments") {
         if let Some(jvm) = args.get("jvm").and_then(|v| v.as_array()) {
             for v in jvm {
-                collect_arg_strings(v, &vars, &mut jvm_args);
+                collect_arg_strings(v, &vars, &features, &mut jvm_args);
             }
         } else {
             jvm_args.push("-cp".to_string());
@@ -466,8 +505,11 @@ fn build_arguments(
         }
         if let Some(game) = args.get("game").and_then(|v| v.as_array()) {
             for v in game {
-                collect_arg_strings(v, &vars, &mut game_args);
+                collect_arg_strings(v, &vars, &features, &mut game_args);
             }
+            let raw = Value::Array(game.clone()).to_string();
+            json_has_resolution = raw.contains("has_custom_resolution");
+            json_has_quick_play = raw.contains("is_quick_play_multiplayer");
         }
     } else {
         // Legacy pre-1.13 flat string.
@@ -477,6 +519,29 @@ fn build_arguments(
             for token in flat.split_whitespace() {
                 game_args.push(substitute(token, &vars));
             }
+        }
+    }
+
+    if resolution && !json_has_resolution {
+        game_args.extend([
+            "--width".to_string(),
+            opts.window_width.to_string(),
+            "--height".to_string(),
+            opts.window_height.to_string(),
+        ]);
+    }
+    if opts.fullscreen {
+        game_args.push("--fullscreen".to_string());
+    }
+    // Before 1.20 there's no quick play; `--server`/`--port` joins a server
+    // straight from the title screen instead.
+    if let Some(qp) = opts.quick_play {
+        if !json_has_quick_play && matches!(qp.kind, crate::types::QuickPlayType::Multiplayer) {
+            let (host, port) = match qp.target.rsplit_once(':') {
+                Some((h, p)) if p.parse::<u16>().is_ok() => (h.to_string(), p.to_string()),
+                _ => (qp.target.clone(), "25565".to_string()),
+            };
+            game_args.extend(["--server".to_string(), host, "--port".to_string(), port]);
         }
     }
 

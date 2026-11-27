@@ -42,6 +42,102 @@ pub fn system_total_memory_mb() -> i64 {
     total_memory_mb()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JavaInfo {
+    /// The executable that was tested (the detected one when none was given).
+    pub path: String,
+    /// First line of `java -version`, e.g. `openjdk version "21.0.2" 2024-01-16`.
+    pub version: String,
+    /// The rest of that output - vendor and VM details.
+    pub details: String,
+}
+
+/// Runs `java -version` on `path`, or on the system Java when it's empty,
+/// for the "Test" button in Settings.
+#[tauri::command(async)]
+pub fn system_java_info(path: String) -> Result<JavaInfo, String> {
+    let path = if path.trim().is_empty() {
+        crate::services::java_manager::detect_system_java()
+            .ok_or("No Java found on this PC - the launcher downloads the right one automatically when you play.")?
+    } else {
+        path.trim().to_string()
+    };
+    // `javaw` prints nothing; ask its console sibling when there is one.
+    let probe = {
+        let p = std::path::Path::new(&path);
+        match p.file_name().and_then(|n| n.to_str()) {
+            Some(n) if n.eq_ignore_ascii_case("javaw.exe") && p.with_file_name("java.exe").exists() => {
+                p.with_file_name("java.exe").to_string_lossy().to_string()
+            }
+            _ => path.clone(),
+        }
+    };
+    let mut command = std::process::Command::new(&probe);
+    command.arg("-version").stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().map_err(|e| format!("Couldn't start {path}: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("{path} exited with {}", output.status));
+    }
+    let text = String::from_utf8_lossy(if output.stderr.is_empty() { &output.stdout } else { &output.stderr }).to_string();
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let version = lines.next().unwrap_or("Java").to_string();
+    let details = lines.collect::<Vec<_>>().join("\n");
+    Ok(JavaInfo { path, version, details })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageEntry {
+    pub id: String,
+    pub bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageUsage {
+    pub root: String,
+    pub total: u64,
+    pub entries: Vec<StorageEntry>,
+}
+
+/// How much space each part of the game directory takes up.
+#[tauri::command]
+pub async fn system_storage_usage(db: State<'_, Db>, app: AppHandle) -> Result<StorageUsage, String> {
+    let root = PathBuf::from(conn_settings(&db, &app).game_directory);
+    tokio::task::spawn_blocking(move || {
+        const KNOWN: [&str; 5] = ["profiles", "assets", "libraries", "runtimes", "versions"];
+        let mut entries: Vec<StorageEntry> = KNOWN
+            .iter()
+            .map(|id| StorageEntry { id: id.to_string(), bytes: worlds_service::dir_size(&root.join(id)) })
+            .collect();
+        let total = worlds_service::dir_size(&root);
+        let known: u64 = entries.iter().map(|e| e.bytes).sum();
+        entries.push(StorageEntry { id: "other".into(), bytes: total.saturating_sub(known) });
+        StorageUsage { root: root.to_string_lossy().to_string(), total, entries }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Opens one of the launcher's own folders in the file manager:
+/// "game" (the game directory) or "data" (settings, database, logs).
+#[tauri::command]
+pub fn system_open_folder(db: State<'_, Db>, app: AppHandle, kind: String) -> Result<(), String> {
+    let path = match kind.as_str() {
+        "game" => PathBuf::from(conn_settings(&db, &app).game_directory),
+        "data" => crate::app_data_dir(&app),
+        _ => return Err(format!("Unknown folder: {kind}")),
+    };
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    open::that(&path).map_err(|e| e.to_string())
+}
+
 #[cfg(windows)]
 fn total_memory_mb() -> i64 {
     #[repr(C)]
@@ -265,7 +361,30 @@ impl launcher_service::LaunchCallbacks for EmitCallbacks {
     }
     fn on_close(&mut self, code: i32) {
         discord_rpc::set_idle_presence();
+        // Bring back a launcher that got out of the way for the game.
+        let behavior = conn_settings(&self.app.state::<Db>(), &self.app).launch_behavior;
+        if behavior != "keep" {
+            if let Some(w) = self.app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }
         let _ = self.app.emit("play:close", code);
+    }
+}
+
+/// Minimizes or hides the launcher once the game is up, per Settings.
+fn apply_launch_behavior(app: &AppHandle, behavior: &str) {
+    let Some(w) = app.get_webview_window("main") else { return };
+    match behavior {
+        "minimize" => {
+            let _ = w.minimize();
+        }
+        "hide" => {
+            let _ = w.hide();
+        }
+        _ => {}
     }
 }
 
@@ -332,6 +451,7 @@ pub async fn play_install_and_launch(
         .await
         .map_err(|e| e.to_string())?;
 
+    apply_launch_behavior(&app, &settings.launch_behavior);
     discord_rpc::set_playing_presence(&version_id, loader);
     remote::track(&app, "game_launch", Some(version_id), Some(loader.as_str().to_string()));
     Ok(())

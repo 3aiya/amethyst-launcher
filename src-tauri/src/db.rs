@@ -43,7 +43,14 @@ fn default_settings(app_data_dir: &PathBuf) -> AmethystSettings {
         news_feed_url: None,
         theme: "dark".into(),
         discord_rpc_enabled: true,
-        telemetry_enabled: true,
+        terms_accepted_version: None,
+        terms_accepted_at: None,
+        custom_resolution: false,
+        fullscreen: false,
+        launch_behavior: "keep".into(),
+        reduce_motion: false,
+        ui_scale: 100,
+        accent_color: None,
     }
 }
 

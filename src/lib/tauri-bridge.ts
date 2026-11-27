@@ -178,6 +178,9 @@ const amethystApi: AmethystApi = {
   system: {
     totalMemoryMb: () => invoke("system_total_memory_mb"),
     appVersion: () => getVersion(),
+    javaInfo: (path) => invoke("system_java_info", { path }),
+    storageUsage: () => invoke("system_storage_usage"),
+    openFolder: (kind) => invoke("system_open_folder", { kind }),
   },
   window: {
     minimize: () => invoke("window_minimize"),

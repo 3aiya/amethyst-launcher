@@ -59,7 +59,7 @@ to this repository, and Windows can tell you it has not been tampered with.
 
 Our full [**Code signing policy**](CODE_SIGNING.md) covers the team roles, how
 to verify a download, and exactly what the launcher sends over the network -
-including the anonymous usage ping you can switch off under Settings → Privacy.
+including the anonymous usage ping.
 
 ## 🛠️ Building from source
 

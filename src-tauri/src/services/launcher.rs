@@ -289,6 +289,8 @@ pub async fn install_and_launch(
         extra_jvm_args: &extra_args,
         window_width: settings.window_width,
         window_height: settings.window_height,
+        custom_resolution: settings.custom_resolution,
+        fullscreen: settings.fullscreen,
         account: &account,
         forge_installer_ran,
         quick_play: quick_play.as_ref(),

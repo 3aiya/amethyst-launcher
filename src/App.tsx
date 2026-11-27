@@ -13,6 +13,10 @@ import AccountModal from "./components/AccountModal";
 import UpdateBanner from "./components/UpdateBanner";
 import AnnouncementBanner from "./components/AnnouncementBanner";
 import DownloadsPanel from "./components/DownloadsPanel";
+import LegalModal from "./components/LegalModal";
+import { LEGAL_VERSION } from "./lib/legal";
+import { applyAppearance } from "./lib/appearance";
+import { MotionConfig } from "framer-motion";
 import {
   completeTask,
   failTask,
@@ -215,6 +219,29 @@ export default function App() {
     }
   }, [settings?.theme]);
 
+  // Accent override, interface zoom and reduced motion - all applied on <html>
+  // so every page picks them up without knowing about them.
+  const accentColor = settings?.accentColor ?? null;
+  const uiScale = settings?.uiScale ?? 100;
+  const reduceMotion = settings?.reduceMotion ?? false;
+  useEffect(() => {
+    applyAppearance({ accentColor, uiScale, reduceMotion });
+  }, [accentColor, uiScale, reduceMotion]);
+
+  // The version list depends on the snapshot / old-version switches.
+  const showSnapshots = settings?.showSnapshots;
+  const showOldVersions = settings?.showOldVersions;
+  const versionFilterKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (showSnapshots === undefined || showOldVersions === undefined) return;
+    const key = `${showSnapshots}|${showOldVersions}`;
+    // The first value is already loaded by the startup effect.
+    if (versionFilterKey.current !== null && versionFilterKey.current !== key) {
+      refreshVersions(showSnapshots, showOldVersions);
+    }
+    versionFilterKey.current = key;
+  }, [showSnapshots, showOldVersions, refreshVersions]);
+
   async function updateSettings(partial: Partial<AmethystSettings>) {
     const updated = await window.amethyst.settings.update(partial);
     setSettings(updated);
@@ -365,16 +392,6 @@ export default function App() {
     }
   }
 
-  async function handleBrowseGameDir() {
-    const dir = await window.amethyst.dialogs.pickFolder(settings?.gameDirectory);
-    if (dir) await updateSettings({ gameDirectory: dir });
-  }
-
-  async function handleBrowseJava() {
-    const javaPath = await window.amethyst.dialogs.pickJava();
-    if (javaPath) await updateSettings({ javaPath });
-  }
-
   function handleRefreshVersions() {
     if (settings) refreshVersions(settings.showSnapshots, settings.showOldVersions);
   }
@@ -387,11 +404,31 @@ export default function App() {
     );
   }
 
+  // First launch (or new terms): nothing but the consent screen until the
+  // user accepts. Declining closes the launcher without saving anything, so
+  // the screen comes back the next time it's opened.
+  if ((settings.termsAcceptedVersion ?? 0) < LEGAL_VERSION) {
+    return (
+      <div className="relative flex h-screen flex-col overflow-hidden rounded-xl bg-bg-sidebar text-zinc-100">
+        <TitleBar />
+        <div className="flex-1 rounded-t-xl bg-bg" />
+        <LegalModal
+          open
+          onAccept={async () => {
+            await updateSettings({ termsAcceptedVersion: LEGAL_VERSION, termsAcceptedAt: Date.now() });
+          }}
+          onDecline={() => window.amethyst.window.close()}
+        />
+      </div>
+    );
+  }
+
   const accountName = settings.account?.name ?? settings.offlineUsername;
   const openInstance = openInstanceId ? profiles.find((p) => p.id === openInstanceId) ?? null : null;
   const accountMode = settings.authMode === "microsoft" ? "Microsoft" : "Offline";
 
   return (
+    <MotionConfig reducedMotion={settings.reduceMotion ? "always" : "user"}>
     <div className="relative flex h-screen flex-col overflow-hidden rounded-xl bg-bg-sidebar text-zinc-100">
       <TitleBar />
       <DownloadsPanel />
@@ -483,8 +520,6 @@ export default function App() {
               accounts={accounts}
               onSave={(partial) => updateSettings(partial)}
               onManageAccounts={() => setAccountsOpen(true)}
-              onBrowseGameDir={handleBrowseGameDir}
-              onBrowseJava={handleBrowseJava}
             />
           </PageSlot>
         </main>
@@ -524,6 +559,7 @@ export default function App() {
         onRemove={handleRemoveAccount}
       />
     </div>
+    </MotionConfig>
   );
 }
 

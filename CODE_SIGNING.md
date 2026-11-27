@@ -82,7 +82,7 @@ nothing else:
 | `textures.minecraft.net`, `crafatar.com` | The account UUID whose skin is being shown | Rendering skins and capes. |
 | Minecraft servers you add | A standard server status ping | The server list's online/player count. |
 | `github.com` | Your launcher version | The update check, and downloading updates. |
-| `amethyst-launcher-admin.vercel.app` | News and config requests, plus an anonymous usage ping — a random per-install id, the launcher version, your OS, and for a game launch the Minecraft version and loader | News, announcements and rough install/launch counts. **Opt out** under Settings → Privacy; nothing is sent once it is off. |
+| `amethyst-launcher-admin.vercel.app` | News and config requests, plus an anonymous usage ping — a random per-install id, the launcher version, your OS, and for a game launch the Minecraft version and loader | News, announcements and rough install/launch counts. Nothing is sent until you accept the privacy policy on first launch. |
 
 The usage ping contains no account name, UUID, email address, IP-derived
 location, file path or anything else that identifies you, and the random

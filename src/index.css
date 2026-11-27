@@ -244,3 +244,49 @@ input[type="range"] {
     animation: none;
   }
 }
+
+/* Settings > Appearance > Reduce motion. Spinners keep turning so busy
+   states still read as busy. */
+:root[data-reduce-motion] *:not(.animate-spin),
+:root[data-reduce-motion] *::before,
+:root[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* ---- Settings page ------------------------------------------------------ */
+.settings-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--fill, 0%),
+    var(--color-bg-elevated) var(--fill, 0%)
+  );
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--color-bg-card);
+  border: 3px solid var(--color-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  transition: transform 0.12s ease;
+}
+
+.settings-range:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.settings-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}

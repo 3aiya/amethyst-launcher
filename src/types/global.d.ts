@@ -34,6 +34,9 @@ import type {
   FileItem,
   ScreenshotItem,
   InstanceStats,
+  LaunchBehavior,
+  JavaInfo,
+  StorageUsage,
 } from "../../shared/ipc-types";
 
 export interface AmethystApi {
@@ -245,6 +248,10 @@ export interface AmethystApi {
   system: {
     totalMemoryMb: () => Promise<number>;
     appVersion: () => Promise<string>;
+    /** `java -version` of `path`, or of the system Java when empty. */
+    javaInfo: (path: string) => Promise<JavaInfo>;
+    storageUsage: () => Promise<StorageUsage>;
+    openFolder: (kind: "game" | "data") => Promise<void>;
   };
   window: {
     minimize: () => void;
@@ -314,4 +321,7 @@ export type {
   FileItem,
   ScreenshotItem,
   InstanceStats,
+  LaunchBehavior,
+  JavaInfo,
+  StorageUsage,
 };

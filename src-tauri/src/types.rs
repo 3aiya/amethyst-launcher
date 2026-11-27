@@ -170,10 +170,55 @@ pub struct AmethystSettings {
     /// Whether to show "Playing ..." on the user's Discord profile.
     #[serde(default = "default_true")]
     pub discord_rpc_enabled: bool,
-    /// Whether the anonymous usage ping is sent (see `services::remote::track`).
-    /// The opt-out the code signing policy promises - see CODE_SIGNING.md.
-    #[serde(default = "default_true")]
-    pub telemetry_enabled: bool,
+    /// Which revision of the Terms of Service / Privacy Policy the user
+    /// accepted on first launch. The launcher stays locked behind the consent
+    /// screen until this matches `LEGAL_VERSION` - bumping that constant asks
+    /// everyone to accept again.
+    #[serde(default)]
+    pub terms_accepted_version: Option<u32>,
+    /// When that acceptance happened (ms since epoch), shown under Settings.
+    #[serde(default)]
+    pub terms_accepted_at: Option<i64>,
+    /// Launch the game at `window_width` x `window_height` instead of
+    /// Minecraft's own default window size.
+    #[serde(default)]
+    pub custom_resolution: bool,
+    /// Start the game fullscreen (`--fullscreen`).
+    #[serde(default)]
+    pub fullscreen: bool,
+    /// What the launcher window does once the game has started:
+    /// "keep" | "minimize" | "hide". Minimized/hidden windows come back when
+    /// the game closes.
+    #[serde(default = "default_launch_behavior")]
+    pub launch_behavior: String,
+    /// Turns off the launcher's own animations.
+    #[serde(default)]
+    pub reduce_motion: bool,
+    /// Interface zoom in percent (85-125).
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: i64,
+    /// Overrides the theme's accent colour (`#rrggbb`); `None` keeps it.
+    #[serde(default)]
+    pub accent_color: Option<String>,
+}
+
+fn default_launch_behavior() -> String {
+    "keep".into()
+}
+
+fn default_ui_scale() -> i64 {
+    100
+}
+
+/// Current revision of the Terms of Service / Privacy Policy. Keep in sync
+/// with `LEGAL_VERSION` in `src/lib/legal.ts`.
+pub const LEGAL_VERSION: u32 = 1;
+
+impl AmethystSettings {
+    /// Whether the current Terms of Service / Privacy Policy were accepted.
+    pub fn terms_accepted(&self) -> bool {
+        self.terms_accepted_version.is_some_and(|v| v >= LEGAL_VERSION)
+    }
 }
 
 fn default_theme() -> String {

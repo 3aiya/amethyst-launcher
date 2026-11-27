@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import "./lib/tauri-bridge";
+import { restoreAppearance } from "./lib/appearance";
+
+restoreAppearance();
 
 // Apply the last-used theme before first paint; App re-syncs from settings.
 try {
